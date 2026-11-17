@@ -111,6 +111,56 @@ describe("post-build-pr", () => {
     );
   });
 
+  it("invokes hooks when GitHub backoff runs", async () => {
+    let waits = 0;
+    const logs: string[] = [];
+    const git = gitImpl({
+      "status\0--porcelain": { code: 0, stdout: "", stderr: "" },
+      "rev-parse\0HEAD": { code: 0, stdout: "abc\n", stderr: "" },
+      "rev-parse\0refs/remotes/origin/feat/x": { code: 0, stdout: "abc\n", stderr: "" },
+    });
+    let ghCalls = 0;
+    const gh = async (_cwd: string, args: string[]): Promise<GhResult> => {
+      ghCalls += 1;
+      const path = ghPath(args);
+      if (path.includes("pulls") && path.includes("state=open")) {
+        if (ghCalls === 1) {
+          return { code: 1, stdout: "", stderr: "rate limit exceeded" };
+        }
+        return {
+          code: 0,
+          stdout: JSON.stringify([{ number: 1, html_url: "https://github.com/o/r/pull/1" }]),
+          stderr: "",
+        };
+      }
+      if (path.includes("rate_limit")) {
+        return {
+          code: 0,
+          stdout: JSON.stringify({ resources: { core: { reset: Math.floor(Date.now() / 1000) + 60 } } }),
+          stderr: "",
+        };
+      }
+      return { code: 0, stdout: "main\n", stderr: "" };
+    };
+    const res = await ensureDraftPrAfterBuild(
+      { cwd: "/wt", branch: "feat/x", title: "feat/x", repoSlug: "o/r" },
+      { git, gh },
+      {
+        onWait: () => {
+          waits += 1;
+        },
+        log: (line) => {
+          logs.push(line);
+        },
+        maxWaitMs: 50,
+        sleep: async () => undefined,
+      },
+    );
+    assert.ok(waits >= 1, "expected at least one backoff wait hook");
+    assert.ok(logs.some((l) => /post-build.*rate limit/i.test(l)), logs.join("\n"));
+    void res;
+  });
+
   it("returns REST error text when pr create fails", async () => {
     const gh = ghImpl([
       ghRoute((p) => p.includes("pulls") && p.includes("state=open"), {
