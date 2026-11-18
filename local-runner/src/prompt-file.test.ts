@@ -14,7 +14,7 @@ import { handleMcpJsonRpc } from "./mcp-handlers.js";
 import { cursorWorktreeDir, repoSlugFromPath } from "./paths.js";
 import { assertSubmitPromptFiles, readStagePromptFile } from "./prompt-file.js";
 import { handleStartJobRequest } from "./server.js";
-import { saveSettings } from "./settings.js";
+import { loadSettings, saveSettings } from "./settings.js";
 import { createJob, loadJob } from "./store.js";
 import type { JobRecord } from "./types.js";
 import { ValidationError } from "./validation-error.js";
@@ -306,6 +306,121 @@ describe("prompt file resolution", () => {
       });
     } finally {
       await rm(repo, { recursive: true, force: true }).catch(() => undefined);
+    }
+  });
+
+  it("accepts a relative prompt whose blob appears on origin/<branch> only after fetch", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "lr-prompt-fetch-"));
+    const bare = path.join(root, "origin.git");
+    const repo = path.join(root, "repo");
+    const other = path.join(root, "other");
+    const branch = "feat/prompts";
+    const jobId = "prompt-after-fetch";
+    const worktree = cursorWorktreeDir(repoSlugFromPath(repo), jobId);
+    const prevPrompt = process.env.GIT_TERMINAL_PROMPT;
+    process.env.GIT_TERMINAL_PROMPT = "0";
+    try {
+      await execFileAsync("git", ["init", "--bare", "-b", "main", bare]);
+      await gitInit(repo);
+      await git(repo, ["remote", "add", "origin", bare]);
+      await git(repo, ["push", "-u", "origin", "main"]);
+      await git(repo, ["checkout", "-b", branch]);
+      await git(repo, ["commit", "--allow-empty", "-m", "branch without prompt"]);
+      await git(repo, ["push", "-u", "origin", branch]);
+      await git(repo, ["checkout", "main"]);
+
+      await execFileAsync("git", ["clone", bare, other]);
+      await git(other, ["config", "user.email", "t@test"]);
+      await git(other, ["config", "user.name", "t"]);
+      await git(other, ["checkout", "-B", branch, `origin/${branch}`]);
+      await mkdir(path.join(other, "prompts"), { recursive: true });
+      await writeFile(path.join(other, REL_IMPLEMENT), "FROM_FETCH\n");
+      await git(other, ["add", REL_IMPLEMENT]);
+      await git(other, ["commit", "-m", "add prompt on remote branch"]);
+      await git(other, ["push", "origin", branch]);
+
+      await assert.rejects(() => access(path.join(repo, REL_IMPLEMENT)));
+      await assert.rejects(() =>
+        git(repo, ["cat-file", "-e", `origin/${branch}:${REL_IMPLEMENT}`]),
+      );
+
+      await assertSubmitPromptFiles({
+        repoPath: repo,
+        branch,
+        promptFile: REL_IMPLEMENT,
+      });
+
+      const typed = await git(repo, ["cat-file", "-t", `origin/${branch}:${REL_IMPLEMENT}`]);
+      assert.equal(typed.trim(), "blob");
+      const wt = await ensureWorktree(repo, jobId, branch);
+      const text = await readStagePromptFile(
+        REL_IMPLEMENT,
+        { worktreePath: wt.path, repoPath: repo },
+        "promptFile",
+      );
+      assert.equal(text, "FROM_FETCH\n");
+      await assert.rejects(() => access(path.join(repo, REL_IMPLEMENT)));
+    } finally {
+      if (prevPrompt === undefined) delete process.env.GIT_TERMINAL_PROMPT;
+      else process.env.GIT_TERMINAL_PROMPT = prevPrompt;
+      await removeWorktree(repo, worktree);
+      await rm(root, { recursive: true, force: true }).catch(() => undefined);
+    }
+  });
+
+  it("accepts a prompt on a detected non-main default branch when main and master are absent", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "lr-prompt-develop-"));
+    const bare = path.join(root, "origin.git");
+    const repo = path.join(root, "repo");
+    const branch = "feat/new";
+    const jobId = "prompt-on-develop";
+    const worktree = cursorWorktreeDir(repoSlugFromPath(repo), jobId);
+    const prevPrompt = process.env.GIT_TERMINAL_PROMPT;
+    process.env.GIT_TERMINAL_PROMPT = "0";
+    try {
+      await execFileAsync("git", ["init", "--bare", "-b", "develop", bare]);
+      await mkdir(repo, { recursive: true });
+      await git(repo, ["init", "-b", "develop"]);
+      await git(repo, ["config", "user.email", "t@test"]);
+      await git(repo, ["config", "user.name", "t"]);
+      await mkdir(path.join(repo, "prompts"), { recursive: true });
+      await writeFile(path.join(repo, REL_IMPLEMENT), "FROM_DEVELOP\n");
+      await git(repo, ["add", REL_IMPLEMENT]);
+      await git(repo, ["commit", "-m", "prompt on develop"]);
+      await git(repo, ["remote", "add", "origin", bare]);
+      await git(repo, ["push", "-u", "origin", "develop"]);
+      await git(repo, ["remote", "set-head", "origin", "develop"]);
+      await rm(path.join(repo, REL_IMPLEMENT));
+
+      await assert.rejects(() => access(path.join(repo, REL_IMPLEMENT)));
+      for (const ref of ["main", "master", "origin/main", "origin/master", `origin/${branch}`]) {
+        await assert.rejects(() => git(repo, ["rev-parse", "--verify", "--quiet", ref]));
+      }
+      const head = await git(repo, ["symbolic-ref", "refs/remotes/origin/HEAD"]);
+      assert.match(head.trim(), /refs\/remotes\/origin\/develop$/);
+
+      const settings = await loadSettings(root);
+      assert.equal(settings.defaultBaseBranch, null);
+      await assertSubmitPromptFiles({
+        repoPath: repo,
+        branch,
+        promptFile: REL_IMPLEMENT,
+        settings,
+      });
+
+      const wt = await ensureWorktree(repo, jobId, branch, settings);
+      assert.equal(wt.baseRef, "origin/develop");
+      const text = await readStagePromptFile(
+        REL_IMPLEMENT,
+        { worktreePath: wt.path, repoPath: repo },
+        "promptFile",
+      );
+      assert.equal(text, "FROM_DEVELOP\n");
+    } finally {
+      if (prevPrompt === undefined) delete process.env.GIT_TERMINAL_PROMPT;
+      else process.env.GIT_TERMINAL_PROMPT = prevPrompt;
+      await removeWorktree(repo, worktree);
+      await rm(root, { recursive: true, force: true }).catch(() => undefined);
     }
   });
 });

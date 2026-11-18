@@ -1,9 +1,10 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { git } from "./github.js";
-import { baseRefProbeOrder } from "./repo-base.js";
+import { baseRefProbeOrder, resolveWorktreeBaseRef } from "./repo-base.js";
 import type { RunnerSettings } from "./settings.js";
 import { ValidationError } from "./validation-error.js";
+import { bestEffortFetchOrigin } from "./worktree.js";
 
 /** Where a relative prompt path is resolved. Worktree wins so branch edits are picked up. */
 export type PromptFileBases = {
@@ -82,17 +83,6 @@ export async function readStagePromptFile(
   throw new PromptFileError(`${label} not readable: ${raw} (tried ${tried}); ${why}`, notFound);
 }
 
-/**
- * Refs `ensureWorktree` checks out, first hit wins: `origin/<branch>` when that ref exists,
- * otherwise the same base list (`origin/main`, then `origin/master`, `main`, and `master`
- * when runner settings are supplied).
- */
-function worktreeCheckoutRefOrder(branch: string, settings?: RunnerSettings): string[] {
-  const remoteRef = `origin/${branch.trim()}`;
-  const bases = settings ? baseRefProbeOrder(settings) : ["origin/main", "origin/master", "main"];
-  return [remoteRef, ...bases.filter((ref) => ref !== remoteRef)];
-}
-
 /** Repo-relative git path, or null when it would leave the tree. */
 function repoRelativeGitPath(filePath: string): string | null {
   const posix = filePath.replace(/\\/g, "/").trim();
@@ -102,25 +92,42 @@ function repoRelativeGitPath(filePath: string): string | null {
   return norm;
 }
 
-async function firstExistingRef(repoPath: string, refs: string[]): Promise<string | null> {
-  for (const ref of refs) {
-    const probe = await git(repoPath, ["rev-parse", "--verify", "--quiet", ref]);
-    if (probe.code === 0 && probe.stdout.trim()) return ref;
+async function refVerifies(repoPath: string, ref: string): Promise<boolean> {
+  const probe = await git(repoPath, ["rev-parse", "--verify", ref]);
+  return probe.code === 0 && probe.stdout.trim().length > 0;
+}
+
+/**
+ * Ref a new `ensureWorktree` checkout uses, matching that function's success path:
+ * best-effort fetch, then `origin/<branch>` when it verifies, then the first probe ref
+ * that verifies, then `resolveWorktreeBaseRef` when settings are present.
+ * Fetch runs once per submit; a stale or missing `origin/<branch>` is updated before the check.
+ */
+async function resolveSubmitCheckoutRef(
+  repoPath: string,
+  branch: string,
+  settings?: RunnerSettings,
+): Promise<string | null> {
+  await bestEffortFetchOrigin(repoPath);
+  const remoteRef = `origin/${branch.trim()}`;
+  if (await refVerifies(repoPath, remoteRef)) return remoteRef;
+
+  const bases = settings ? baseRefProbeOrder(settings) : ["origin/main", "origin/master", "main"];
+  for (const ref of bases) {
+    if (ref === remoteRef) continue;
+    if (await refVerifies(repoPath, ref)) return ref;
   }
+
+  if (!settings) return null;
+  const resolved = await resolveWorktreeBaseRef(repoPath, settings);
+  if (await refVerifies(repoPath, resolved.ref)) return resolved.ref;
   return null;
 }
 
-/** True when `filePath` is a blob on the ref a new worktree will check out. */
-async function relativePromptOnCheckoutRef(
-  repoPath: string,
-  branch: string,
-  filePath: string,
-  settings?: RunnerSettings,
-): Promise<boolean> {
+/** True when `filePath` is a blob on `ref`. */
+async function blobOnRef(repoPath: string, ref: string, filePath: string): Promise<boolean> {
   const gitPath = repoRelativeGitPath(filePath);
   if (!gitPath) return false;
-  const ref = await firstExistingRef(repoPath, worktreeCheckoutRefOrder(branch, settings));
-  if (!ref) return false;
   const typed = await git(repoPath, ["cat-file", "-t", `${ref}:${gitPath}`]);
   return typed.code === 0 && typed.stdout.trim() === "blob";
 }
@@ -129,8 +136,8 @@ async function relativePromptOnCheckoutRef(
  * Submit-time check for API and MCP `start_job`.
  * An absolute path must be readable as given.
  * A relative path with a local repo must be readable from that working tree, or be a blob on the
- * ref `ensureWorktree` will check out. The stored path is left unchanged so each stage resolves
- * it against the worktree again.
+ * ref `ensureWorktree` will check out. That ref is resolved once per submit. The stored path is
+ * left unchanged so each stage resolves it against the worktree again.
  * Relative paths with no local repo yet (clone-from-remote) are checked when the stage runs.
  */
 export async function assertSubmitPromptFiles(args: {
@@ -141,24 +148,25 @@ export async function assertSubmitPromptFiles(args: {
   reviewPromptFile?: string;
   fixPromptFile?: string;
 }): Promise<void> {
+  const repoPath = args.repoPath?.trim() ?? "";
+  const branch = args.branch?.trim() ?? "";
+  let checkoutRef: Promise<string | null> | undefined;
+  const checkoutRefOnce = (): Promise<string | null> => {
+    checkoutRef ??= resolveSubmitCheckoutRef(repoPath, branch, args.settings);
+    return checkoutRef;
+  };
+
   for (const label of SUBMIT_PROMPT_FIELDS) {
     const raw = args[label]?.trim();
     if (!raw) continue;
-    if (!path.isAbsolute(raw) && !args.repoPath?.trim()) continue;
+    if (!path.isAbsolute(raw) && !repoPath) continue;
     try {
       await readStagePromptFile(raw, { repoPath: args.repoPath }, label);
     } catch (err) {
       if (!(err instanceof PromptFileError)) throw err;
-      const repoPath = args.repoPath?.trim();
-      const branch = args.branch?.trim();
-      if (
-        err.notFound &&
-        repoPath &&
-        branch &&
-        !path.isAbsolute(raw) &&
-        (await relativePromptOnCheckoutRef(repoPath, branch, raw, args.settings))
-      ) {
-        continue;
+      if (err.notFound && repoPath && branch && !path.isAbsolute(raw)) {
+        const ref = await checkoutRefOnce();
+        if (ref && (await blobOnRef(repoPath, ref, raw))) continue;
       }
       throw new ValidationError(err.message);
     }
