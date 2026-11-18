@@ -315,6 +315,7 @@ async function setStage(
 ): Promise<void> {
   job.stage = stage;
   if (STAGES_CLEAR_ERROR.has(stage)) job.error = null;
+  if (stage !== "building") job.statusDetail = null;
   await persistJob(config, job, control);
   emit(cb, job, { type: "stage", stage, reviewRound: job.reviewRound });
 }
@@ -509,8 +510,8 @@ export async function runJobLoop(
       }
     }
 
-    // --- building / implementor ---
-    if (job.stage === "building" && !job.prUrl) {
+    // --- building / implementor (runs for new prompts even when an open PR was adopted) ---
+    if (job.stage === "building") {
       const skipImplementor = Boolean(job.postBuildPendingPr);
       if (!skipImplementor) {
         let prompt: string;
@@ -577,30 +578,51 @@ export async function runJobLoop(
         }
       }
       let ensurePrError: string | undefined;
-      if (!pr && !job.dryRun && jobExpectsPr(job.input)) {
+      if (!job.dryRun && jobExpectsPr(job.input)) {
+        const postBuildLog = async (line: string) => {
+          const full = line.startsWith("[runner]") ? line : `[runner] ${line}`;
+          await runnerLog(callbacks, job, full);
+        };
+        const setWait = (detail: NonNullable<JobRecord["statusDetail"]>) => {
+          job.statusDetail = detail;
+          void persistJob(config, job, control).catch(() => undefined);
+        };
+        await postBuildLog("post-build: starting commit, push, and PR link");
+        job.statusDetail = { phase: "post_build_pr", reason: "post-build: commit/push/PR" };
+        await persistJob(config, job, control);
         const ensured = await ensureDraftPrAfterBuild(
           {
             cwd: wt,
             branch: job.input.branch,
             title: job.title || job.input.branch,
             repoSlug: job.repoSlug,
+            prUrl: job.prUrl,
           },
           { git: defaultGit, gh: defaultGh },
+          {
+            log: (line) => void postBuildLog(line),
+            onWait: (info) => {
+              const until =
+                info.untilIso ??
+                (info.resetAtEpochSec != null
+                  ? new Date(info.resetAtEpochSec * 1000).toISOString()
+                  : undefined);
+              setWait({
+                phase: "post_build_pr",
+                reason: info.reason,
+                ...(until ? { until } : {}),
+              });
+            },
+          },
         );
+        job.statusDetail = null;
+        await persistJob(config, job, control);
         if (ensured.ok) {
           pr = ensured.pr;
-          await appendFile(
-            job.logPath,
-            `[runner] opened draft PR after build: ${pr.url}\n`,
-            "utf8",
-          ).catch(() => undefined);
+          await postBuildLog(`opened or adopted draft PR after build: ${pr.url}`);
         } else {
           ensurePrError = ensured.error;
-          await appendFile(
-            job.logPath,
-            `[runner] could not open PR after build: ${ensured.error}\n`,
-            "utf8",
-          ).catch(() => undefined);
+          await postBuildLog(`could not open PR after build: ${ensured.error}`);
         }
       }
       if (!pr) {
@@ -771,6 +793,8 @@ export async function runJobLoop(
             prUrl: job.prUrl,
           });
           job.approveHeadSha = prView?.headRefOid ?? (await readHeadSha(wt));
+        } else {
+          job.approveHeadSha = await readHeadSha(wt);
         }
         await setStage(config, job, "approved", control, callbacks);
         await notify(config, job, `Loop approved: ${job.input.branch}`, callbacks?.fetchImpl);

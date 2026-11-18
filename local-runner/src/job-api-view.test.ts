@@ -60,4 +60,16 @@ describe("enrichJobPublicView", () => {
       "Preparing worktree",
     );
   });
+
+  it("surfaces statusDetail for GitHub rate-limit waits (#223)", () => {
+    const msg = jobActivityMessage(
+      job({
+        statusDetail: {
+          reason: "waiting on GitHub rate limit",
+          until: "2026-11-16T22:40:00.000Z",
+        },
+      }),
+    );
+    assert.match(msg ?? "", /waiting on GitHub rate limit until/i);
+  });
 });
