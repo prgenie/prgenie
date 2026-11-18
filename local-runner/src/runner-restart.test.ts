@@ -200,12 +200,14 @@ describe("live runner restart (detached workers)", () => {
     opts: { withPr?: boolean; driver?: string } = {},
   ): Promise<string> {
     const driver = opts.driver ?? "slow-dry-run";
+    const promptFile = path.join(dataDir, "prompt.md");
+    await writeFile(promptFile, "implement\n", "utf8");
     const job = await createJob(
       dataDir,
       {
         repoPath: "/tmp/repo",
         branch: `feat/restart-${stage}-${reviewRound}-${Date.now()}-${Math.random()}`,
-        promptFile: "/p.md",
+        promptFile,
         maxRounds: 1,
         dryRun: true,
         driver,

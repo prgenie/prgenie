@@ -1,4 +1,4 @@
-import { appendFile, readFile } from "node:fs/promises";
+import { appendFile } from "node:fs/promises";
 import type { RunnerConfig } from "./config.js";
 import { AgentRunner } from "./agent.js";
 import {
@@ -62,6 +62,7 @@ import { diagnosePrSetupIssues, enrichNoPrGuardMessage } from "./job-preflight.j
 import { ensureDraftPrAfterBuild } from "./post-build-pr.js";
 import { git as defaultGit, gh as defaultGh } from "./github.js";
 import { maybeCleanupJobWorktree } from "./worktree-cleanup.js";
+import { readStagePromptFile, type PromptFileBases } from "./prompt-file.js";
 
 export type JobCallbacks = {
   onEvent?: (jobId: string, event: JobEvent) => void;
@@ -73,12 +74,26 @@ export type JobCallbacks = {
 
 type WatchdogTiming = Pick<StageWatchdogOptions, "now" | "tickMs" | "childGraceMs">;
 
-async function readPromptFile(filePath: string, fallback: string): Promise<string> {
-  if (!filePath?.trim()) return fallback;
+function promptBases(job: JobRecord, worktreePath: string): PromptFileBases {
+  return { worktreePath, repoPath: job.input.repoPath };
+}
+
+/** Relative prompt paths resolve against the worktree, then repoPath, when the stage runs. */
+async function readPromptFile(
+  label: string,
+  filePath: string,
+  fallback: string,
+  bases: PromptFileBases,
+  job: JobRecord,
+  callbacks?: JobCallbacks,
+): Promise<string> {
   try {
-    return await readFile(filePath, "utf8");
-  } catch {
-    return fallback;
+    const text = await readStagePromptFile(filePath, bases, label);
+    return text ?? fallback;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await runnerLog(callbacks, job, `[runner] ${message}`);
+    throw err instanceof Error ? err : new Error(message);
   }
 }
 
@@ -336,7 +351,14 @@ async function runFixStage(
     await mergeOntoBase(wt, baseSettings);
   }
   const fixDefault = isDocsJob(job) ? resolveDocsFixPrompt() : DEFAULT_FIX_PROMPT;
-  const fixPrompt = await readPromptFile(job.input.fixPromptFile ?? "", fixDefault);
+  const fixPrompt = await readPromptFile(
+    "fixPromptFile",
+    job.input.fixPromptFile ?? "",
+    fixDefault,
+    promptBases(job, wt),
+    job,
+    callbacks,
+  );
   const fixSteer = control.drainSteer();
   const prLabel = job.dryRun ? "(dry run — simulated PR)" : String(job.prUrl);
   const fixFull = fixSteer
@@ -514,14 +536,29 @@ export async function runJobLoop(
       const skipImplementor = Boolean(job.postBuildPendingPr);
       if (!skipImplementor) {
         let prompt: string;
+        const bases = promptBases(job, wt);
         if (isDocsJob(job)) {
           const template = isDocsTemplateId(job.input.docsTemplate) ? job.input.docsTemplate : null;
           const fallback = resolveDocsImplementPrompt(template);
-          prompt = await readPromptFile(job.input.promptFile, fallback);
+          prompt = await readPromptFile(
+            "promptFile",
+            job.input.promptFile,
+            fallback,
+            bases,
+            job,
+            callbacks,
+          );
         } else if (job.dryRun && !job.input.promptFile?.trim()) {
           prompt = DRY_RUN_PLACEHOLDER_PROMPT;
         } else {
-          prompt = await readPromptFile(job.input.promptFile, DEFAULT_IMPLEMENT_PROMPT);
+          prompt = await readPromptFile(
+            "promptFile",
+            job.input.promptFile,
+            DEFAULT_IMPLEMENT_PROMPT,
+            bases,
+            job,
+            callbacks,
+          );
         }
         const steer = control.drainSteer();
         const fullPrompt = steer ? `${prompt}\n\n--- steer ---\n${steer}` : prompt;
@@ -689,7 +726,14 @@ export async function runJobLoop(
       const reviewRoundStartedAt = new Date().toISOString();
 
       const reviewFallback = isDocsJob(job) ? DOCS_REVIEW_PROMPT : DEFAULT_REVIEW_PROMPT;
-      const reviewPrompt = await readPromptFile(job.input.reviewPromptFile ?? "", reviewFallback);
+      const reviewPrompt = await readPromptFile(
+        "reviewPromptFile",
+        job.input.reviewPromptFile ?? "",
+        reviewFallback,
+        promptBases(job, wt),
+        job,
+        callbacks,
+      );
       const reviewSteer = control.drainSteer();
       const prLabel = job.dryRun ? "(dry run — simulated PR)" : String(job.prUrl);
       const reviewFull = reviewSteer

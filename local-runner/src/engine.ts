@@ -56,6 +56,7 @@ import {
 import { liveWorkerLock, readWorkerLock } from "./job-worker-lock.js";
 import { inspectRestartState } from "./runner-restart.js";
 import { stat } from "node:fs/promises";
+import { assertSubmitPromptFiles } from "./prompt-file.js";
 
 const ACTIVE_STAGES = new Set(["building", "reviewing", "fixing"]);
 
@@ -173,6 +174,12 @@ export class RunnerEngine extends EventEmitter {
     if (preflight.blocking.length) {
       throw new ValidationError(formatJobPreflightErrors(preflight.blocking));
     }
+    await assertSubmitPromptFiles({
+      repoPath: target.repoPath,
+      promptFile: args.promptFile,
+      reviewPromptFile: args.reviewPromptFile,
+      fixPromptFile: args.fixPromptFile,
+    });
     const preflightWarnings = preflight.warnings.map(formatJobPreflightMessage);
     const job = await createJob(this.config.dataDir, args, {
       model: this.config.defaultModel,

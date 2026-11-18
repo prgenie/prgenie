@@ -792,6 +792,8 @@ describe("start job validation parity (HTTP POST /api/jobs vs MCP start_job)", (
       await seedJob(s.dataDir, "occupies-slot", "building");
       const repoPath = await mkdtemp(path.join(os.tmpdir(), "lr-parity-models-repo-"));
       await initBareGitRepo(repoPath);
+      const promptFile = path.join(repoPath, "prompt.md");
+      await writeFile(promptFile, "# prompt\n", "utf8");
       const requests: Array<[string, Record<string, unknown>, Record<string, string>]> = [
         [
           "explicit fix beats legacy model",
@@ -806,7 +808,7 @@ describe("start job validation parity (HTTP POST /api/jobs vs MCP start_job)", (
         ],
       ];
       for (const [i, [label, extra, expected]] of requests.entries()) {
-        const payload = { ...base, repoPath, ...extra };
+        const payload = { ...base, repoPath, promptFile, ...extra };
         const res = await httpRequest(s.port, "POST", "/api/jobs", {
           token: TOKEN,
           body: JSON.stringify({ ...payload, branch: `feat/http-${i}` }),
