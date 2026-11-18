@@ -387,6 +387,12 @@ export function parseSettingsPatch(payload: Record<string, unknown>): SettingsPa
       MAX_ACTIVE_JOBS_MAX,
     );
   }
+  if (payload.autoContinueOnBoot !== undefined) {
+    if (typeof payload.autoContinueOnBoot !== "boolean") {
+      throw new ValidationError("autoContinueOnBoot must be a boolean");
+    }
+    patch.autoContinueOnBoot = payload.autoContinueOnBoot;
+  }
   if (payload.defaultBaseBranch !== undefined) {
     patch.defaultBaseBranch = nullableTrimmed(payload.defaultBaseBranch);
   }

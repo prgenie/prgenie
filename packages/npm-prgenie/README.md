@@ -213,6 +213,8 @@ npx -y prgenie serve  # reads runner.token automatically (no export required)
 
 Open `http://127.0.0.1:9473/` (default). Paste the token from `runner.token` into the dashboard (serve prints the path on startup). MCP over HTTP: `POST /mcp` with `Authorization: Bearer` from that file. Optional override: `export PRGENIE_RUNNER_TOKEN="$(cat ~/.prgenie/local-runner/runner.token)"`.
 
+**Start at boot (Linux).** A reboot kills job workers. The next `prgenie serve` auto-continues jobs left `interrupted` by `worker_exit` when the worktree still exists (setting `autoContinueOnBoot`, default on; one attempt per job per boot; extras queue at `maxActiveJobs`). The dashboard stage shows `auto-continued`. `prgenie install-service` writes a systemd user unit (`prgenie-runner.service`, oneshot + `RemainAfterExit`, `KillMode=process`) that runs `restart --build` with **no git pull**, sets `PRGENIE_RUNNER_HOST=0.0.0.0`, and enables linger. `install-service --print` previews the unit. Start it now with `systemctl --user start prgenie-runner.service`.
+
 ## Email notifications (Resend)
 
 Optional notify emails fire when a job opens/updates a PR and when the loop finishes (`approved` / `changes_remaining`). Configure **on the machine that runs `prgenie serve`** (stdio-only MCP uses the same env if you also run `serve`).

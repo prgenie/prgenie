@@ -1,4 +1,6 @@
 import { writeSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { loadConfig, runnerTokenFile } from "./config.js";
 import { RunnerEngine } from "./engine.js";
 import { handleMcpJsonRpc } from "./mcp-handlers.js";
@@ -22,6 +24,12 @@ import { runningViaNpx } from "./cli-invocation.js";
 import { formatRunnerDoctorReport, runRunnerDoctor } from "./runner-doctor.js";
 import { runJobWorker } from "./job-worker.js";
 import { runRunnerRestartCli } from "./runner-restart.js";
+import {
+  installRunnerUserService,
+  planRunnerUserServiceFromEntry,
+  renderRunnerUserService,
+  resolveServiceEntry,
+} from "./install-service.js";
 import { spawn } from "node:child_process";
 import { childProcessSpawnOptions } from "./spawn-options.js";
 import { runCli } from "./cli-errors.js";
@@ -30,7 +38,7 @@ import { runnerCliVersion } from "./version.js";
 async function cmdServe(): Promise<void> {
   process.env.PRGENIE_RUNNER_ROLE = "serve";
   const config = await loadConfig(process.env, { command: "serve" });
-  const engine = new RunnerEngine(config);
+  const engine = new RunnerEngine(config, { autoContinueOnBoot: true });
   await engine.init();
   const server = startHttpServer(config, engine);
   await bindRunnerHttpServer(server, config.host, config.port);
@@ -180,6 +188,34 @@ async function cmdRunnerRestart(): Promise<void> {
   );
 }
 
+async function cmdInstallService(): Promise<void> {
+  const entry = resolveServiceEntry(process.argv[1], process.env.PRGENIE_RUNNER_BINARY);
+  const plan = planRunnerUserServiceFromEntry({ execPath: process.execPath, entry });
+  const unit = renderRunnerUserService(plan);
+  if (process.argv.includes("--print")) {
+    process.stdout.write(unit);
+    return;
+  }
+  const unitDir = path.join(os.homedir(), ".config", "systemd", "user");
+  const user = os.userInfo().username;
+  const installed = await installRunnerUserService({
+    plan,
+    unitDir,
+    user,
+    enableLinger: !process.argv.includes("--no-linger"),
+  });
+  const lines = [
+    `Wrote ${installed.unitPath}`,
+    "Enabled prgenie-runner.service for the next boot (restart --build, no git pull).",
+    installed.linger
+      ? `Linger enabled for ${user}.`
+      : `Linger was not enabled. Run: loginctl enable-linger ${user}`,
+    "Start now with: systemctl --user start prgenie-runner.service",
+  ];
+  // eslint-disable-next-line no-console
+  console.log(lines.join("\n"));
+}
+
 async function cmdPrune(): Promise<void> {
   const config = await loadConfig(process.env, { command: "mcp" });
   const jobs = await listJobs(config.dataDir, { includeArchived: true });
@@ -205,6 +241,7 @@ const KNOWN_COMMANDS = new Set([
   "prune-worktrees",
   "job-worker",
   "restart",
+  "install-service",
 ]);
 
 function printUsage(): void {
@@ -217,6 +254,8 @@ Usage:
   prgenie mcp              MCP over stdio (no bearer token)
   prgenie serve            HTTP dashboard + bearer MCP
   prgenie restart [--build]  Graceful HTTP restart (detached workers keep running)
+  prgenie install-service [--print] [--no-linger]
+                         systemd user unit: start at boot (no git pull)
   prgenie job-worker <id>    Internal: detached job loop (do not call by hand)
   prgenie config --client cursor|vscode|claude-code|claude-desktop [--global|--npx]
   prgenie prune-worktrees
@@ -256,6 +295,7 @@ async function main(): Promise<void> {
   else if (cmd === "prune-worktrees") await cmdPrune();
   else if (cmd === "job-worker") await cmdJobWorker();
   else if (cmd === "restart") await cmdRunnerRestart();
+  else if (cmd === "install-service") await cmdInstallService();
 }
 
 runCli(main);

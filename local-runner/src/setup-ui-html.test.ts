@@ -34,6 +34,7 @@ describe("setup UI html (#145)", () => {
   it("exposes v2 runner policy controls", () => {
     assert.match(html, /id="defaultMaxRounds"/);
     assert.match(html, /id="maxActiveJobs"/);
+    assert.match(html, /id="autoContinueOnBoot"/);
     assert.match(html, /id="stageModelBuild"/);
     assert.match(html, /id="stageModelReview"/);
     assert.match(html, /id="stageModelFix"/);

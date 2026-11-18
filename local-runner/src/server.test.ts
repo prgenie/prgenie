@@ -531,6 +531,11 @@ describe("PATCH /api/settings validation", () => {
       "notifyEvents.onFailed must be a boolean",
     ],
     [
+      "autoContinueOnBoot string",
+      { autoContinueOnBoot: "yes" },
+      "autoContinueOnBoot must be a boolean",
+    ],
+    [
       "expectedRevision string",
       { expectedRevision: "1" },
       "expectedRevision must be a non-negative integer",

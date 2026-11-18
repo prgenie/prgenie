@@ -65,6 +65,11 @@ export type RunnerSettings = {
   stageModels: StageModelDefaults;
   watchdog: ReturnType<typeof parseWatchdogPolicy>;
   maxActiveJobs: number;
+  /**
+   * On `serve` startup, resume jobs left `interrupted` by `worker_exit` when their worktree
+   * still exists. One attempt per job per boot.
+   */
+  autoContinueOnBoot: boolean;
   /** null or "auto" = detect repository default branch; otherwise explicit git ref. */
   defaultBaseBranch: string | null;
   /** Display-only hint; server may still bind from env. */
@@ -148,6 +153,7 @@ const DEFAULT: RunnerSettings = {
   stageModels: { ...DEFAULT_STAGE_MODELS },
   watchdog: { ...DEFAULT_WATCHDOG },
   maxActiveJobs: MAX_ACTIVE_JOBS_DEFAULT,
+  autoContinueOnBoot: true,
   defaultBaseBranch: null,
   hostBindHint: null,
   drivers: DEFAULT_DRIVERS,
@@ -253,6 +259,7 @@ function parseSettings(raw: Partial<RunnerSettings>): RunnerSettings {
       MAX_ACTIVE_JOBS_MIN,
       MAX_ACTIVE_JOBS_MAX,
     ),
+    autoContinueOnBoot: typeof raw.autoContinueOnBoot === "boolean" ? raw.autoContinueOnBoot : true,
     defaultBaseBranch:
       typeof raw.defaultBaseBranch === "string" && raw.defaultBaseBranch.trim()
         ? raw.defaultBaseBranch.trim()
@@ -332,6 +339,7 @@ export type SettingsPatch = {
   stageModels?: Partial<StageModelDefaults>;
   watchdog?: Partial<RunnerSettings["watchdog"]>;
   maxActiveJobs?: number;
+  autoContinueOnBoot?: boolean;
   defaultBaseBranch?: string | null;
   hostBindHint?: string | null;
   drivers?: DriverEntry[];
@@ -409,6 +417,10 @@ export async function saveSettings(dataDir: string, patch: SettingsPatch): Promi
       patch.maxActiveJobs !== undefined
         ? validateMaxActiveJobs(patch.maxActiveJobs, current.maxActiveJobs)
         : current.maxActiveJobs,
+    autoContinueOnBoot:
+      patch.autoContinueOnBoot !== undefined
+        ? patch.autoContinueOnBoot
+        : current.autoContinueOnBoot,
     defaultBaseBranch:
       patch.defaultBaseBranch !== undefined
         ? patch.defaultBaseBranch?.trim() || null

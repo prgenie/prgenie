@@ -46,6 +46,7 @@ import {
   runJobStartPreflight,
 } from "./job-preflight.js";
 import { markJobInterrupted } from "./job-interrupted.js";
+import { readMachineBootId, resumeInterruptedJobsOnBoot } from "./reboot-auto-continue.js";
 import { spawnDetachedJobWorker } from "./job-worker-spawn.js";
 import {
   superviseDetachedWorker,
@@ -84,6 +85,8 @@ export class RunnerEngine extends EventEmitter {
   readonly jobControls = new Map<string, JobControl>();
   private readonly watchCi: boolean;
   private readonly superviseOptions: WorkerSuperviseOptions;
+  private readonly autoContinueOnBoot: boolean;
+  private readonly readBootId: () => Promise<string>;
 
   constructor(
     readonly config: RunnerConfig,
@@ -92,12 +95,21 @@ export class RunnerEngine extends EventEmitter {
       ciWatcherDeps?: CiWatcherDeps;
       /** Detached-worker supervisor timing (tests shorten polls and grace). */
       workerSupervisor?: WorkerSuperviseOptions;
+      /**
+       * Resume `worker_exit` jobs on startup. `prgenie serve` passes true. Stdio MCP and in-process
+       * engines leave it off so a `PRGENIE_RUNNER_ROLE=serve` test env does not resume jobs.
+       */
+      autoContinueOnBoot?: boolean;
+      /** Test double for `/proc/sys/kernel/random/boot_id`. */
+      readBootId?: () => Promise<string>;
     } = {},
   ) {
     super();
     this.watchCi = opts.watchCi ?? true;
     this.ciWatcher = new CiWatcher(config, this, opts.ciWatcherDeps);
     this.superviseOptions = opts.workerSupervisor ?? {};
+    this.autoContinueOnBoot = opts.autoContinueOnBoot ?? false;
+    this.readBootId = opts.readBootId ?? readMachineBootId;
   }
 
   private readonly queueOptions = { isRunning: (id: string) => this.isRunning(id) };
@@ -134,8 +146,24 @@ export class RunnerEngine extends EventEmitter {
       if (job.stopRequested) continue;
       this.schedule(job.id);
     }
+    if (this.autoContinueOnBoot) {
+      await this.resumeInterruptedFromReboot();
+    }
     await this.drainQueue();
     if (this.watchCi) this.ciWatcher.start();
+  }
+
+  /** After a reboot, continue `worker_exit` jobs once per boot (queued when the cap is full). */
+  private async resumeInterruptedFromReboot(): Promise<void> {
+    const bootId = await this.readBootId();
+    await resumeInterruptedJobsOnBoot(this.config, {
+      bootId,
+      continueJob: async (id, rebootBootId) => {
+        const result = await this.continueJob({ id }, { rebootBootId });
+        const job = await loadJob(this.config.dataDir, id);
+        return { queued: result.queued, stage: result.stage, job };
+      },
+    });
   }
 
   async startJob(args: StartJobArgs | Record<string, unknown>): Promise<JobPublicView> {
@@ -432,7 +460,10 @@ export class RunnerEngine extends EventEmitter {
     });
   }
 
-  async continueJob(raw: Record<string, unknown>): Promise<{
+  async continueJob(
+    raw: Record<string, unknown>,
+    opts?: { rebootBootId?: string },
+  ): Promise<{
     ok: true;
     id: string;
     stage: string;
@@ -442,10 +473,15 @@ export class RunnerEngine extends EventEmitter {
     queued: boolean;
   }> {
     const result = await this.withQueueLock(async () => {
-      const prepared = await continueJobFromRaw(this.config, raw, {
-        // A worker owned by another serve/mcp process may still be finishing this job.
-        isRunning: (id) => this.isRunning(id) || liveWorkerLock(this.config.dataDir, id) !== null,
-      });
+      const prepared = await continueJobFromRaw(
+        this.config,
+        raw,
+        {
+          // A worker owned by another serve/mcp process may still be finishing this job.
+          isRunning: (id) => this.isRunning(id) || liveWorkerLock(this.config.dataDir, id) !== null,
+        },
+        opts?.rebootBootId ? { rebootBootId: opts.rebootBootId } : undefined,
+      );
       if (!prepared.queued) {
         this.schedule(prepared.job.id);
       }
