@@ -695,4 +695,61 @@ describe("prgenie restart --build", () => {
     );
     assert.equal(nothingListening, 1, "nothing came up");
   });
+
+  it("prints a custom bind host in the restart message", async () => {
+    const logs: string[] = [];
+    const dialed: string[] = [];
+    const code = await runRunnerRestartCli(
+      { ...base, build: false, host: "10.4.5.6", port: 9473 },
+      {
+        log: (m) => logs.push(m),
+        error: () => undefined,
+        callRestart: async (host) => {
+          dialed.push(`restart:${host}`);
+          return { status: 200, body: {} };
+        },
+        waitForPortFree: async (host) => {
+          dialed.push(`free:${host}`);
+          return true;
+        },
+        launch: () => undefined,
+        waitForUp: async (host) => {
+          dialed.push(`up:${host}`);
+          return true;
+        },
+      },
+    );
+    assert.equal(code, 0);
+    assert.deepEqual(dialed, ["restart:10.4.5.6", "free:10.4.5.6", "up:10.4.5.6"]);
+    assert.deepEqual(logs, ["Runner restarted on 10.4.5.6:9473"]);
+  });
+
+  it("prints the all-interfaces bind host and dials loopback", async () => {
+    const logs: string[] = [];
+    const dialed: string[] = [];
+    const refused = Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" });
+    const code = await runRunnerRestartCli(
+      { ...base, build: false, host: "0.0.0.0", port: 9473 },
+      {
+        log: (m) => logs.push(m),
+        error: () => undefined,
+        callRestart: async (host) => {
+          dialed.push(host);
+          throw refused;
+        },
+        launch: () => undefined,
+        waitForUp: async (host) => {
+          dialed.push(host);
+          return true;
+        },
+      },
+    );
+    assert.equal(code, 0);
+    assert.deepEqual(dialed, ["127.0.0.1", "127.0.0.1"]);
+    assert.equal(logs[0], "No runner on 0.0.0.0:9473; starting one.");
+    assert.match(
+      logs[1] ?? "",
+      /^Runner restarted on 0\.0\.0\.0:9473 \(reachable on your network; UI http:\/\/[^)]+:9473\/\)$/,
+    );
+  });
 });
