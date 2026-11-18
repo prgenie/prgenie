@@ -135,6 +135,25 @@ describe("job store", () => {
     assert.equal(fromSlug.title, "dashboard script parse");
   });
 
+  it("derives the title from a relative prompt file under repoPath", async () => {
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), "lr-store-title-"));
+    const repo = await mkdtemp(path.join(os.tmpdir(), "lr-store-title-repo-"));
+    await mkdir(path.join(repo, "prompts"), { recursive: true });
+    await writeFile(path.join(repo, "prompts/implement.md"), "# Ship from repo\n", "utf8");
+    const job = await createJob(
+      dataDir,
+      {
+        repoPath: repo,
+        branch: "feat/prompts",
+        promptFile: "prompts/implement.md",
+        dryRun: true,
+      },
+      createDefaults(dataDir),
+    );
+    assert.equal(job.title, "Ship from repo");
+    assert.equal(job.input.promptFile, "prompts/implement.md");
+  });
+
   it("docs job uses setup default repo preset over code default", async () => {
     const dataDir = await mkdtemp(path.join(os.tmpdir(), "lr-store-docs-"));
     const { saveSettings } = await import("./settings.js");

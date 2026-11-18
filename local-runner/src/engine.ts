@@ -176,6 +176,8 @@ export class RunnerEngine extends EventEmitter {
     }
     await assertSubmitPromptFiles({
       repoPath: target.repoPath,
+      branch: args.branch,
+      settings,
       promptFile: args.promptFile,
       reviewPromptFile: args.reviewPromptFile,
       fixPromptFile: args.fixPromptFile,

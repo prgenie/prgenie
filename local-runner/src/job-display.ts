@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import path from "node:path";
 
 /** Parse human title from a Linear issue URL slug segment (after issue id). */
 export function linearSlugTitleFromTicketUrl(ticketUrl: string | null | undefined): string | null {
@@ -38,12 +39,23 @@ export function stripRadIssuePrefix(heading: string, linearIssue?: string | null
   return stripped || heading.trim();
 }
 
+/** Absolute prompt paths are read as given. Relative paths resolve against `repoPath` only. */
+function promptPathForTitle(promptFile: string, repoPath?: string | null): string | null {
+  const raw = promptFile.trim();
+  if (!raw) return null;
+  if (path.isAbsolute(raw)) return raw;
+  const base = repoPath?.trim();
+  if (!base) return null;
+  return path.resolve(base, raw);
+}
+
 export async function resolveJobTitle(args: {
   title?: string;
   ticketUrl?: string | null;
   linearIssue?: string | null;
   branch: string;
   promptFile: string;
+  repoPath?: string | null;
 }): Promise<string> {
   const explicit = args.title?.trim();
   if (explicit) return explicit;
@@ -51,12 +63,15 @@ export async function resolveJobTitle(args: {
   const fromLinear = linearSlugTitleFromTicketUrl(args.ticketUrl);
   if (fromLinear) return fromLinear;
 
-  try {
-    const raw = await readFile(args.promptFile, "utf8");
-    const heading = firstMarkdownHeading(raw);
-    if (heading) return stripRadIssuePrefix(heading, args.linearIssue);
-  } catch {
-    /* prompt may not exist yet at job create */
+  const promptPath = promptPathForTitle(args.promptFile, args.repoPath);
+  if (promptPath) {
+    try {
+      const raw = await readFile(promptPath, "utf8");
+      const heading = firstMarkdownHeading(raw);
+      if (heading) return stripRadIssuePrefix(heading, args.linearIssue);
+    } catch {
+      /* prompt may not exist yet at job create */
+    }
   }
 
   const branch = args.branch.trim();

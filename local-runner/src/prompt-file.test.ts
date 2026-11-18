@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -11,12 +11,14 @@ import { RunnerEngine } from "./engine.js";
 import { JobControl } from "./job-control.js";
 import { runJobLoop } from "./job-runner.js";
 import { handleMcpJsonRpc } from "./mcp-handlers.js";
+import { cursorWorktreeDir, repoSlugFromPath } from "./paths.js";
 import { assertSubmitPromptFiles, readStagePromptFile } from "./prompt-file.js";
 import { handleStartJobRequest } from "./server.js";
 import { saveSettings } from "./settings.js";
 import { createJob, loadJob } from "./store.js";
 import type { JobRecord } from "./types.js";
 import { ValidationError } from "./validation-error.js";
+import { ensureWorktree, removeWorktree } from "./worktree.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -42,11 +44,19 @@ function testConfig(dataDir: string): RunnerConfig {
   };
 }
 
+async function git(cwd: string, args: string[]): Promise<string> {
+  const { stdout } = await execFileAsync("git", ["-C", cwd, ...args], {
+    env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+  });
+  return stdout;
+}
+
 async function gitInit(dir: string): Promise<void> {
-  await execFileAsync("git", ["-C", dir, "init", "-b", "main"]);
-  await execFileAsync("git", ["-C", dir, "config", "user.email", "t@test"]);
-  await execFileAsync("git", ["-C", dir, "config", "user.name", "t"]);
-  await execFileAsync("git", ["-C", dir, "commit", "--allow-empty", "-m", "init"]);
+  await mkdir(dir, { recursive: true });
+  await git(dir, ["init", "-b", "main"]);
+  await git(dir, ["config", "user.email", "t@test"]);
+  await git(dir, ["config", "user.name", "t"]);
+  await git(dir, ["commit", "--allow-empty", "-m", "init"]);
 }
 
 class CaptureRunner extends AgentRunner {
@@ -186,6 +196,117 @@ describe("prompt file resolution", () => {
       () => assertSubmitPromptFiles({ promptFile: path.join(repo, "missing.md") }),
       (err: Error) => err instanceof ValidationError && /promptFile not readable/.test(err.message),
     );
+  });
+
+  it("accepts a relative prompt that is absent from the working tree and present on origin/<branch>", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "lr-prompt-origin-"));
+    const bare = path.join(root, "origin.git");
+    const repo = path.join(root, "repo");
+    const branch = "feat/prompts";
+    const jobId = "prompt-on-branch";
+    const worktree = cursorWorktreeDir(repoSlugFromPath(repo), jobId);
+    const prevPrompt = process.env.GIT_TERMINAL_PROMPT;
+    process.env.GIT_TERMINAL_PROMPT = "0";
+    try {
+      await execFileAsync("git", ["init", "--bare", "-b", "main", bare]);
+      await gitInit(repo);
+      await git(repo, ["remote", "add", "origin", bare]);
+      await git(repo, ["push", "-u", "origin", "main"]);
+      await git(repo, ["checkout", "-b", branch]);
+      await mkdir(path.join(repo, "prompts"), { recursive: true });
+      await writeFile(path.join(repo, REL_IMPLEMENT), "FROM_BRANCH\n");
+      await git(repo, ["add", REL_IMPLEMENT]);
+      await git(repo, ["commit", "-m", "add implement prompt"]);
+      await git(repo, ["push", "-u", "origin", branch]);
+      await git(repo, ["checkout", "main"]);
+      await assert.rejects(() => access(path.join(repo, REL_IMPLEMENT)));
+
+      await assertSubmitPromptFiles({
+        repoPath: repo,
+        branch,
+        promptFile: REL_IMPLEMENT,
+      });
+      await assert.rejects(
+        () =>
+          assertSubmitPromptFiles({
+            repoPath: repo,
+            branch,
+            reviewPromptFile: REL_REVIEW,
+          }),
+        (err: Error) =>
+          err instanceof ValidationError && /reviewPromptFile not readable/.test(err.message),
+      );
+
+      const wt = await ensureWorktree(repo, jobId, branch);
+      const text = await readStagePromptFile(
+        REL_IMPLEMENT,
+        { worktreePath: wt.path, repoPath: repo },
+        "promptFile",
+      );
+      assert.equal(text, "FROM_BRANCH\n");
+      await assert.rejects(() => access(path.join(repo, REL_IMPLEMENT)));
+    } finally {
+      if (prevPrompt === undefined) delete process.env.GIT_TERMINAL_PROMPT;
+      else process.env.GIT_TERMINAL_PROMPT = prevPrompt;
+      await removeWorktree(repo, worktree);
+      await rm(root, { recursive: true, force: true }).catch(() => undefined);
+    }
+  });
+
+  it("rejects a prompt that is only on the base when origin/<branch> does not contain it", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "lr-prompt-base-only-"));
+    const bare = path.join(root, "origin.git");
+    const repo = path.join(root, "repo");
+    const branch = "feat/prompts";
+    const onlyOnMain = "prompts/only-on-main.md";
+    try {
+      await execFileAsync("git", ["init", "--bare", "-b", "main", bare]);
+      await gitInit(repo);
+      await mkdir(path.join(repo, "prompts"), { recursive: true });
+      await writeFile(path.join(repo, onlyOnMain), "FROM_MAIN\n");
+      await git(repo, ["add", onlyOnMain]);
+      await git(repo, ["commit", "-m", "prompt on main"]);
+      await git(repo, ["remote", "add", "origin", bare]);
+      await git(repo, ["push", "-u", "origin", "main"]);
+      await git(repo, ["checkout", "-b", branch]);
+      await git(repo, ["rm", onlyOnMain]);
+      await git(repo, ["commit", "-m", "drop main-only prompt"]);
+      await git(repo, ["push", "-u", "origin", branch]);
+      await assert.rejects(() => access(path.join(repo, onlyOnMain)));
+
+      await assert.rejects(
+        () => assertSubmitPromptFiles({ repoPath: repo, branch, promptFile: onlyOnMain }),
+        (err: Error) =>
+          err instanceof ValidationError && /promptFile not readable/.test(err.message),
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true }).catch(() => undefined);
+    }
+  });
+
+  it("accepts a relative prompt missing from the working tree when the checkout base still has it", async () => {
+    const repo = await mkdtemp(path.join(os.tmpdir(), "lr-prompt-base-fallback-"));
+    try {
+      await gitInit(repo);
+      await mkdir(path.join(repo, "prompts"), { recursive: true });
+      await writeFile(path.join(repo, REL_IMPLEMENT), IMPLEMENT);
+      await git(repo, ["add", REL_IMPLEMENT]);
+      await git(repo, ["commit", "-m", "add prompt"]);
+      await assertSubmitPromptFiles({
+        repoPath: repo,
+        branch: "feat/new",
+        promptFile: REL_IMPLEMENT,
+      });
+      await rm(path.join(repo, REL_IMPLEMENT));
+      await assert.rejects(() => access(path.join(repo, REL_IMPLEMENT)));
+      await assertSubmitPromptFiles({
+        repoPath: repo,
+        branch: "feat/new",
+        promptFile: REL_IMPLEMENT,
+      });
+    } finally {
+      await rm(repo, { recursive: true, force: true }).catch(() => undefined);
+    }
   });
 });
 
