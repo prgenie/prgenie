@@ -37,7 +37,12 @@ describe("start_job MCP schema", () => {
       { type: string; properties?: Record<string, unknown> }
     >;
     assert.equal(props.stageModels.type, "object");
-    assert.deepEqual(Object.keys(props.stageModels.properties ?? {}), ["build", "review", "fix"]);
+    assert.deepEqual(Object.keys(props.stageModels.properties ?? {}), [
+      "build",
+      "review",
+      "rereview",
+      "fix",
+    ]);
   });
 
   it("uses operator-neutral ticket field descriptions", () => {

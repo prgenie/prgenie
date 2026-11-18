@@ -40,7 +40,7 @@ async function seedTerminal(
     reviewRound: 3,
     maxRounds: 3,
     model: "m",
-    stageModels: { build: "m", review: "m", fix: "auto" },
+    stageModels: { build: "m", review: "m", rereview: "auto", fix: "auto" },
     driverId: "cursor-agent",
     worktreePath: "/repo/.cursor-worktrees/o-r/" + id,
     repoSlug: "o/r",

@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { RunnerConfig } from "./config.js";
+import { jobFile, jobsDir } from "./paths.js";
 import { createJob, listJobs, loadJob, saveJob } from "./store.js";
 import {
   clearStaleSettlingMarkers,
@@ -43,6 +44,32 @@ describe("job store", () => {
     );
     assert.equal(job.input.promptFile, "");
     assert.equal(job.dryRun, true);
+  });
+
+  it("fills a missing re-review model from the review model on load", async () => {
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), "lr-store-rereview-"));
+    const id = "job-old-rereview";
+    await mkdir(jobsDir(dataDir), { recursive: true });
+    await writeFile(
+      jobFile(dataDir, id),
+      JSON.stringify({
+        id,
+        model: "composer-2.5",
+        stageModels: { build: "b", review: "r", fix: "f" },
+        effectiveSnapshot: {
+          maxRounds: 3,
+          stageModels: { build: "b", review: "r", fix: "f" },
+          baseRef: null,
+          watchdogInactivityMs: 1,
+          watchdogStageCapMs: 1,
+          watchdogRecoveryAttempts: 0,
+        },
+      }),
+      "utf8",
+    );
+    const job = await loadJob(dataDir, id);
+    assert.equal(job?.stageModels?.rereview, "r");
+    assert.equal(job?.effectiveSnapshot?.stageModels.rereview, "r");
   });
 
   it("persists jobs across reload", async () => {

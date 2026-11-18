@@ -34,7 +34,12 @@ const DOCS_TEMPLATES: readonly NonNullable<StartJobArgs["docsTemplate"]>[] = [
   "policy",
   "research",
 ];
-const STAGE_MODEL_KEYS: readonly (keyof StageModelDefaults)[] = ["build", "review", "fix"];
+const STAGE_MODEL_KEYS: readonly (keyof StageModelDefaults)[] = [
+  "build",
+  "review",
+  "rereview",
+  "fix",
+];
 const NOTIFY_EVENT_KEYS: readonly (keyof NotifyEventSettings)[] = [
   "onFailed",
   "onStuck",
@@ -225,6 +230,7 @@ export function normalizeStartJobArgs(
     stageModels = {
       build: validateStageModel(sm.build, driverForValidation, "build"),
       review: validateStageModel(sm.review, driverForValidation, "review"),
+      rereview: validateStageModel(sm.rereview, driverForValidation, "rereview"),
       fix: validateStageModel(sm.fix, driverForValidation, "fix"),
     };
   }

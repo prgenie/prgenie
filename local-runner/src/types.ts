@@ -21,7 +21,7 @@ export type JobWorkerState = {
 
 export type JobProfile = "code" | "docs" | "compute";
 
-export type JobStageModelKey = "build" | "review" | "fix";
+export type JobStageModelKey = "build" | "review" | "rereview" | "fix";
 
 export type JobStageModels = Record<JobStageModelKey, string>;
 
@@ -178,7 +178,10 @@ export interface JobRecord {
   model: string;
   /** Resolved per-stage models snapshot at job creation. */
   stageModels?: JobStageModels;
-  /** Driver-reported or observed model id per stage (when known). */
+  /**
+   * Driver-reported or observed model id per stage (when known).
+   * Review round 1 is `review`; review round 2+ is `rereview`.
+   */
   stageModelActual?: Partial<JobStageModels>;
   effectiveSnapshot?: JobEffectiveSnapshot;
   watchdog?: WatchdogState;
