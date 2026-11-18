@@ -233,6 +233,11 @@ export interface JobRecord {
   /** Extra fix→review rounds started via continue_job / POST continue. */
   continueHistory?: JobContinueHistoryEntry[];
   /**
+   * Set when `serve` auto-continued this job after a reboot. A matching `bootId` blocks another
+   * auto-continue until the machine boots again.
+   */
+  rebootAutoContinue?: { bootId: string; at: string } | null;
+  /**
    * Build stage finished but the runner has not linked a PR yet (PR step failed or was rate-limited).
    * continue_job resumes at the PR step instead of re-running the implementor.
    */

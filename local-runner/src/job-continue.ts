@@ -74,6 +74,11 @@ export type ContinueJobDeps = {
   ) => Promise<{ pr: PrInfo | null; res: GhResult }>;
 };
 
+export type PrepareContinueOptions = {
+  /** Record a reboot auto-continue so a later startup in the same boot does not repeat it. */
+  rebootBootId?: string;
+};
+
 function jobHadWorktree(job: JobRecord): boolean {
   return Boolean(job.worktreePath?.trim());
 }
@@ -131,6 +136,7 @@ export async function prepareJobContinue(
   config: RunnerConfig,
   args: ContinueJobArgs,
   deps: ContinueJobDeps,
+  opts: PrepareContinueOptions = {},
 ): Promise<ContinueJobResult> {
   const id = args.id.trim();
   if (!id) throw new ContinueJobError("id is required", "invalid_id");
@@ -278,6 +284,13 @@ export async function prepareJobContinue(
     throw new ContinueJobError(decision.reason, "branch_conflict");
   }
 
+  const bootId = opts.rebootBootId?.trim();
+  if (bootId) {
+    job.rebootAutoContinue = { bootId, at: new Date().toISOString() };
+  } else {
+    job.rebootAutoContinue = null;
+  }
+
   await saveJob(config.dataDir, job);
   return { job, worktree, queued };
 }
@@ -286,7 +299,8 @@ export async function continueJobFromRaw(
   config: RunnerConfig,
   raw: Record<string, unknown>,
   deps: ContinueJobDeps,
+  opts?: PrepareContinueOptions,
 ): Promise<ContinueJobResult> {
   const args = normalizeContinueJobArgs(raw);
-  return prepareJobContinue(config, args, deps);
+  return prepareJobContinue(config, args, deps, opts);
 }

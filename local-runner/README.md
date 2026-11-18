@@ -220,8 +220,28 @@ HTTP `serve` runs each active job in a **detached `job-worker` process** (own PI
 - **Stage budget:** a single stage may run for at most `stageCapMs × (recoveryAttempts + 1)` plus kill grace and 5 min of slack, counted from when that stage started (or from when the worker started, whichever is later).
 - A hung or over-budget worker gets `SIGTERM` to its process group, then `SIGKILL` after a grace period. The job is marked only once the process is confirmed gone. A healthy worker is never abandoned, however long the job runs.
 
-When a worker is confirmed dead and its job is still `building` / `reviewing` / `fixing`, the job becomes **`interrupted`** (or `stopped` if a stop was pending) and is never silently dropped. Resume it with `continue_job` / `POST …/continue`. A terminal job with no PR yet (including `stuck` from the no-PR guard) re-runs its build stage on the same branch and worktree.
+When a worker is confirmed dead and its job is still `building` / `reviewing` / `fixing`, the job becomes **`interrupted`** (or `stopped` if a stop was pending) and is never silently dropped. Resume it with `continue_job` / `POST …/continue`, or let the next `prgenie serve` auto-continue a `worker_exit` (see [Start at boot](#start-at-boot)). A terminal job with no PR yet (including `stuck` from the no-PR guard) re-runs its build stage on the same branch and worktree.
 
 **Idle restart** (no `building` / `reviewing` / `fixing` jobs) behaves as before.
 
 Env: `PRGENIE_RUNNER_ROLE=serve` (set automatically by `prgenie serve`). Stdio `mcp` still runs jobs **inline** (`PRGENIE_RUNNER_INLINE_JOBS=1` inside workers). Do not point restart helpers at a production port (default `9473`) from tests or automation without an isolated `PRGENIE_RUNNER_DATA_DIR` and port.
+
+## Start at boot
+
+A full machine reboot kills detached job workers. A normal `prgenie restart` does not: live workers are re-adopted. After a reboot the next `prgenie serve` finds those jobs in `interrupted` with `Interrupted (worker_exit)` and, when **Auto-continue jobs interrupted by a reboot** is on (the default, `autoContinueOnBoot`), resumes each one whose worktree directory still exists. Jobs past `maxActiveJobs` are queued. Each job is auto-continued at most once per boot (`/proc/sys/kernel/random/boot_id`), so a worker that dies again is not restarted in a loop until the next boot. The dashboard stage label gains `· auto-continued`. Stdio `mcp` does not auto-continue. Turn the behavior off in Runner setup or with `PATCH /api/settings` `{ "autoContinueOnBoot": false }`.
+
+The workstation starts the runner at boot with a systemd **user** unit `prgenie-runner.service`:
+
+- `Type=oneshot` and `RemainAfterExit=yes` so the unit stays active after `ExecStart` exits
+- `KillMode=process` so stopping the unit does not kill the detached `serve` process or job workers
+- `ExecStart` runs `restart --build` (rebuild the checkout already on disk; **no `git pull`**)
+- `Environment=PRGENIE_RUNNER_HOST=0.0.0.0` so the dashboard stays on the LAN address
+- linger enabled (`loginctl enable-linger`) so the user service runs without an interactive login
+
+```bash
+node local-runner/dist/runner.cjs install-service
+# preview only: node local-runner/dist/runner.cjs install-service --print
+systemctl --user start prgenie-runner.service
+```
+
+`install-service` writes `~/.config/systemd/user/prgenie-runner.service`, runs `systemctl --user daemon-reload` and `enable` (not `--now`), and tries `loginctl enable-linger`. From an npm install with no pnpm workspace, the unit runs `restart` without `--build`.

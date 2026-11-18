@@ -79,6 +79,16 @@ describe("dashboardStageLabel queued", () => {
     });
     assert.equal(dashboardStageLabel(j), "queued (#3)");
   });
+
+  it("marks a reboot auto-continue on the stage label", () => {
+    const j = baseJob({
+      stage: "building",
+      rebootAutoContinue: { bootId: "boot-1", at: "2026-11-11T20:16:00.000Z" },
+    });
+    assert.equal(dashboardStageLabel(j), "building · auto-continued");
+    j.queueState = { queued: true, position: 1, since: "2026-11-11T20:16:00.000Z" };
+    assert.equal(dashboardStageLabel(j), "queued (#1) · auto-continued");
+  });
 });
 
 describe("formatRelativeTime", () => {

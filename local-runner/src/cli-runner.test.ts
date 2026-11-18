@@ -78,6 +78,19 @@ describe("runner CLI flags", () => {
     assert.equal((await runRunner(["--help"])).code, 0);
     assert.equal((await runRunner([])).code, 0);
     assert.match((await runRunner(["--help"])).stdout, /prgenie serve/);
+    assert.match((await runRunner(["--help"])).stdout, /install-service/);
+  });
+
+  it("install-service --print emits the systemd unit and does not enable it", async () => {
+    const { code, stdout, stderr } = await runRunner(["install-service", "--print"]);
+    assert.equal(code, 0, stderr);
+    assert.match(stdout, /Type=oneshot/);
+    assert.match(stdout, /RemainAfterExit=yes/);
+    assert.match(stdout, /KillMode=process/);
+    assert.match(stdout, /PRGENIE_RUNNER_HOST=0\.0\.0\.0/);
+    assert.match(stdout, /restart --build/);
+    assert.doesNotMatch(stdout, /^ExecStart=.*git pull/m);
+    assert.doesNotMatch(stderr, /systemctl/);
   });
 
   it("unknown command exits non-zero", async () => {

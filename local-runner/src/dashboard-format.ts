@@ -32,17 +32,18 @@ export const DOCS_STAGE_LABELS: Record<string, string> = {
 };
 
 export function dashboardStageLabel(job: JobRecord): string {
+  let label: string;
   if (job.queueState && job.queueState.queued) {
     const pos = job.queueState.position;
-    return pos != null ? `queued (#${pos})` : "queued";
+    label = pos != null ? `queued (#${pos})` : "queued";
+  } else if (!isDocsJobRecord(job)) {
+    label = job.stage === "reviewing" ? `reviewing (r${job.reviewRound})` : job.stage;
+  } else {
+    const base = DOCS_STAGE_LABELS[job.stage] ?? job.stage;
+    label = job.stage === "reviewing" ? `${base} (r${job.reviewRound})` : base;
   }
-  if (!isDocsJobRecord(job)) {
-    if (job.stage === "reviewing") return `reviewing (r${job.reviewRound})`;
-    return job.stage;
-  }
-  const base = DOCS_STAGE_LABELS[job.stage] ?? job.stage;
-  if (job.stage === "reviewing") return `${base} (r${job.reviewRound})`;
-  return base;
+  if (job.rebootAutoContinue?.at) label = `${label} · auto-continued`;
+  return label;
 }
 
 export function dashboardChecksColumnHeader(job: JobRecord): string {

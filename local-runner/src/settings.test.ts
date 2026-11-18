@@ -30,6 +30,7 @@ describe("runner settings", () => {
     assert.equal(s.notify.enabled, false);
     assert.equal(s.defaultMaxRounds, 3);
     assert.equal(s.maxActiveJobs, 2);
+    assert.equal(s.autoContinueOnBoot, true);
     assert.equal(s.stageModels.fix, "auto");
     assert.equal(s.stageModels.rereview, "auto");
   });
@@ -122,10 +123,20 @@ describe("runner settings", () => {
     assert.equal(s.defaultDriver, "claude-code");
     assert.equal(s.maxActiveJobs, 8);
     assert.equal(s.defaultMaxRounds, 1);
+    assert.equal(s.autoContinueOnBoot, true);
 
     const saved = await saveSettings(dataDir, { hostBindHint: "0.0.0.0" });
     assert.equal(saved.notify.recipient, "me@example.com");
     assert.equal(saved.maxActiveJobs, 8);
+  });
+
+  it("persists autoContinueOnBoot false", async () => {
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), "lr-set-boot-"));
+    const saved = await saveSettings(dataDir, { autoContinueOnBoot: false });
+    assert.equal(saved.autoContinueOnBoot, false);
+    assert.equal((await loadSettings(dataDir)).autoContinueOnBoot, false);
+    const kept = await saveSettings(dataDir, { hostBindHint: "0.0.0.0" });
+    assert.equal(kept.autoContinueOnBoot, false);
   });
 
   it("PATCH validation stays strict for out-of-range values", async () => {

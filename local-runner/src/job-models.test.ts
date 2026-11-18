@@ -316,12 +316,14 @@ describe("stage models", () => {
   it("a default job reviews round 1 on the review model and later rounds on re-review", async () => {
     const dataDir = await mkdtemp(path.join(os.tmpdir(), "lr-models-run-rounds-"));
     const repo = await mkdtemp(path.join(os.tmpdir(), "lr-models-run-repo-"));
+    const promptFile = path.join(repo, "prompt.md");
+    await writeFile(promptFile, "Build the feature.\n", "utf8");
     const job = await createJob(
       dataDir,
       {
         repoPath: repo,
         branch: "feat/rereview",
-        promptFile: path.join(repo, "missing.md"),
+        promptFile,
         maxRounds: 3,
         dryRun: true,
       },

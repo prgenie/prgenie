@@ -82,6 +82,11 @@ export function setupUiHtml(
       <input type="number" id="maxActiveJobs" class="min-w-0 max-w-full" inputmode="numeric" />
     </label>
     <p class="meta field-error text-sm text-red-400" id="err-maxActiveJobs" hidden></p>
+    <label class="mt-2 flex items-center gap-2">
+      <input type="checkbox" id="autoContinueOnBoot" checked />
+      Auto-continue jobs interrupted by a reboot
+    </label>
+    <p class="meta">On serve startup, resume <code>worker_exit</code> jobs whose worktree still exists. One attempt per job per boot.</p>
     <h3 class="mt-3 text-sm font-medium">Per-stage default models</h3>
     <p class="meta">Leave blank to inherit. Re-review (round 2+) defaults to <code>auto</code> on drivers that support it and to the review model otherwise. Fix defaults to <code>auto</code> on drivers that support it.</p>
     <label class="block min-w-0">Build model
@@ -363,6 +368,7 @@ export function setupUiHtml(
         loaded.defaultMaxRounds ?? loaded.effectiveDefaultMaxRounds ?? BOUNDS.maxRounds.min,
       );
       document.getElementById("maxActiveJobs").value = String(loaded.maxActiveJobs ?? BOUNDS.maxActiveJobs.min);
+      document.getElementById("autoContinueOnBoot").checked = loaded.autoContinueOnBoot !== false;
       const sm = loaded.stageModels || {};
       document.getElementById("stageModelBuild").value = stageInputValue(null, sm.build);
       document.getElementById("stageModelReview").value = stageInputValue(null, sm.review);
@@ -492,6 +498,7 @@ export function setupUiHtml(
         hostBindHint: document.getElementById("hostBindHint").value.trim() || null,
         defaultMaxRounds: Math.trunc(Number(document.getElementById("defaultMaxRounds").value)),
         maxActiveJobs: Math.trunc(Number(document.getElementById("maxActiveJobs").value)),
+        autoContinueOnBoot: document.getElementById("autoContinueOnBoot").checked,
         stageModels: {
           build: stageVal("stageModelBuild"),
           review: stageVal("stageModelReview"),
