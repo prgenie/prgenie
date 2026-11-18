@@ -126,7 +126,9 @@ export class CiWatcher {
         this.engine.emit("event", job.id, { type: "ci" });
       }
 
-      await cleanup(this.config, job, Date.now(), (msg) => console.warn(`[ci-watcher] ${msg}`));
+      await cleanup(this.config, job, Date.now(), (msg) => console.warn(`[ci-watcher] ${msg}`), {
+        skipMergeSync: true,
+      });
     } catch {
       // Never crash serve on CI poll failures.
     }
@@ -142,7 +144,9 @@ export class CiWatcher {
       if (shouldPollCi(job, nowMs) || shouldPollDocChecks(job)) {
         due.push(job);
       } else if (job.worktreePath) {
-        await cleanup(this.config, job, nowMs, (msg) => console.warn(`[ci-watcher] ${msg}`));
+        await cleanup(this.config, job, nowMs, (msg) => console.warn(`[ci-watcher] ${msg}`), {
+          skipMergeSync: true,
+        });
       }
     }
 

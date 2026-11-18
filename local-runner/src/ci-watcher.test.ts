@@ -137,4 +137,33 @@ describe("CiWatcher", () => {
     await watcher.tick();
     assert.deepEqual(fetched.sort(), ["feat/active", "feat/settled"]);
   });
+
+  it("cleanup from the watcher never makes its own merged-PR REST call (#236)", async () => {
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), "lr-ciw-cleanup-"));
+    const config = testConfig(dataDir);
+    const job = await createJob(
+      dataDir,
+      { repoPath: "/tmp/repo", branch: "feat/settled", promptFile: "/p", dryRun: true },
+      { model: "m", dryRun: true, config },
+    );
+    job.prUrl = "https://github.com/example/example/pull/1";
+    job.prNumber = 1;
+    job.stage = "approved";
+    job.worktreePath = "/tmp/wt-settled";
+    job.ciStatus = { status: "success", checkedAt: new Date().toISOString(), source: "github" };
+    await saveJob(dataDir, job);
+
+    const seen: Array<boolean | undefined> = [];
+    const watcher = new CiWatcher(config, fakeEngine, {
+      fetchPrCiStatus: async () => ({ status: "success", summary: "ok", source: "github" }),
+      syncDraftReadyForJob: async (j) => ({ job: j, changed: false }),
+      cleanupWorktree: async (_c, _j, _n, _l, opts) => {
+        seen.push(opts?.skipMergeSync);
+      },
+      fetchCoreRemaining: async () => 4000,
+    });
+    await watcher.tick(); // settled + recently checked: cleanup-only path
+    await watcher.refreshJobById(job.id); // refresh path
+    assert.deepEqual(seen, [true, true]);
+  });
 });
