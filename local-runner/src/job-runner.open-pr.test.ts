@@ -88,8 +88,14 @@ describe("runJobLoop with existing open PR (#225)", () => {
     await runJobLoop(config, job, JobControl.fromPersisted(job), { agentRunner: runner });
 
     assert.equal(job.stage, "approved");
-    assert.ok(runner.stages.includes("build"), `expected build stage, got: ${runner.stages.join(",")}`);
-    assert.ok(runner.stages.includes("review"), `expected review stage, got: ${runner.stages.join(",")}`);
+    assert.ok(
+      runner.stages.includes("build"),
+      `expected build stage, got: ${runner.stages.join(",")}`,
+    );
+    assert.ok(
+      runner.stages.includes("review"),
+      `expected review stage, got: ${runner.stages.join(",")}`,
+    );
     assert.ok(job.stageModelActual?.build, "build stage model should be recorded");
     const headAfter = await readHeadSha(repo);
     assert.equal(job.approveHeadSha, headAfter, "approveHeadSha should match post-build HEAD");

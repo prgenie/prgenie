@@ -75,10 +75,9 @@ async function restListOpenPrsForHead(
   retry: boolean,
 ): Promise<{ pr: PrInfo | null; res: GhResult }> {
   const prefix = repoApiPrefix(resolveRepoSlug(repoSlug, null));
-  const head =
-    resolveRepoSlug(repoSlug, null)?.includes("/")
-      ? headRefForBranch(resolveRepoSlug(repoSlug, null), branch)
-      : await resolveHeadQualifier(cwd, branch, repoSlug, gh);
+  const head = resolveRepoSlug(repoSlug, null)?.includes("/")
+    ? headRefForBranch(resolveRepoSlug(repoSlug, null), branch)
+    : await resolveHeadQualifier(cwd, branch, repoSlug, gh);
   const args = [
     "api",
     "-X",

@@ -93,8 +93,7 @@ async function adoptOpenPrForBranchIfNeeded(
   if (isGithubRateLimitResult(res)) {
     const resets = await fetchRateLimitResets(cwd, ghRaw);
     const resetAt = Math.max(resets?.core ?? 0, resets?.graphql ?? 0) || undefined;
-    const until =
-      resetAt != null ? new Date(resetAt * 1000).toLocaleTimeString() : "later";
+    const until = resetAt != null ? new Date(resetAt * 1000).toLocaleTimeString() : "later";
     throw new ContinueJobError(
       `GitHub rate limit; retry continue after ${until}`,
       "rate_limited",

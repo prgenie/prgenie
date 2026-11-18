@@ -136,7 +136,9 @@ describe("post-build-pr", () => {
       if (path.includes("rate_limit")) {
         return {
           code: 0,
-          stdout: JSON.stringify({ resources: { core: { reset: Math.floor(Date.now() / 1000) + 60 } } }),
+          stdout: JSON.stringify({
+            resources: { core: { reset: Math.floor(Date.now() / 1000) + 60 } },
+          }),
           stderr: "",
         };
       }
@@ -157,7 +159,10 @@ describe("post-build-pr", () => {
       },
     );
     assert.ok(waits >= 1, "expected at least one backoff wait hook");
-    assert.ok(logs.some((l) => /post-build.*rate limit/i.test(l)), logs.join("\n"));
+    assert.ok(
+      logs.some((l) => /post-build.*rate limit/i.test(l)),
+      logs.join("\n"),
+    );
     void res;
   });
 
