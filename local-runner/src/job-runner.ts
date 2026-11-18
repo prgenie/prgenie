@@ -48,7 +48,7 @@ import { runAgentWithWatchdog, type StageWatchdogOptions } from "./stage-watchdo
 import { isComputeJob } from "./job-type-watchdog.js";
 import { createProcessActivitySampler } from "./watchdog-process-activity.js";
 import { trackShellToolLine, type ShellToolTracker } from "./stream-json-log.js";
-import { modelForActiveStage, recordActualModel } from "./job-models.js";
+import { modelForActiveStage, recordActualModel, stageModelKeyForRun } from "./job-models.js";
 import { setJobError } from "./job-error.js";
 import { parseWatchdogPolicy } from "./runner-policy.js";
 import {
@@ -204,11 +204,7 @@ async function runAgentStage(
     }
   };
   const model = modelForActiveStage(job, stage);
-  recordActualModel(
-    job,
-    stage === "building" ? "build" : stage === "reviewing" ? "review" : "fix",
-    model,
-  );
+  recordActualModel(job, stageModelKeyForRun(stage, job.reviewRound), model);
   // The serve-side supervisor budgets detached workers per stage from the on-disk clock.
   await persistJob(config, job, control);
 

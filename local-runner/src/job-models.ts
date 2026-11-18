@@ -1,12 +1,13 @@
 import type { RunnerConfig } from "./config.js";
 import type { JobInput, JobRecord } from "./types.js";
-import { BUILTIN_FIX_MODEL } from "./runner-policy.js";
+import { BUILTIN_FIX_MODEL, BUILTIN_REREVIEW_MODEL } from "./runner-policy.js";
 import type { RunnerSettings, StageModelDefaults } from "./settings.js";
 import { ValidationError } from "./validation-error.js";
 
 export type ResolvedStageModels = {
   build: string;
   review: string;
+  rereview: string;
   fix: string;
 };
 
@@ -29,6 +30,7 @@ export function normalizeStageModels(
   return {
     build: typeof raw?.build === "string" && raw.build.trim() ? raw.build.trim() : null,
     review: typeof raw?.review === "string" && raw.review.trim() ? raw.review.trim() : null,
+    rereview: typeof raw?.rereview === "string" && raw.rereview.trim() ? raw.rereview.trim() : null,
     fix: typeof raw?.fix === "string" && raw.fix.trim() ? raw.fix.trim() : null,
   };
 }
@@ -49,7 +51,8 @@ function firstModel(candidates: ModelCandidate[], fallback: ResolvedModel): Reso
  * Resolve per-stage models at job creation. Each stage takes the first value set, in order:
  * request `stageModels[stage]`, request `model` (legacy, every stage), settings
  * `stageModels[stage]`, the stage default (build: settings `defaultModel`; review: the settings
- * build model; fix: `auto` on drivers that support it, else the build model), then the env model.
+ * build model; re-review: `auto` on drivers that support it, else the review model; fix: `auto`
+ * on drivers that support it, else the build model), then the env model.
  */
 export function resolveStageModelsForJob(
   config: RunnerConfig,
@@ -77,6 +80,16 @@ export function resolveStageModelsForJob(
     ],
     env,
   );
+  const settingsRereview = defaults.rereview?.trim();
+  const rereview = firstModel(
+    [
+      [requested?.rereview, "job"],
+      [requestAll, "job"],
+      [settingsRereview === "auto" && !supportsAuto ? null : settingsRereview, "settings"],
+      [supportsAuto ? BUILTIN_REREVIEW_MODEL : null, "builtin"],
+    ],
+    review,
+  );
   const settingsFix = defaults.fix?.trim();
   const fix = firstModel(
     [
@@ -92,6 +105,7 @@ export function resolveStageModelsForJob(
     ["fix", fix.value],
     ["build", build.value],
     ["review", review.value],
+    ["rereview", rereview.value],
   ] as const) {
     if (model === "auto" && !supportsAuto) {
       throw new ValidationError(
@@ -103,9 +117,25 @@ export function resolveStageModelsForJob(
   return {
     build: build.value,
     review: review.value,
+    rereview: rereview.value,
     fix: fix.value,
-    sources: { build: build.source, review: review.source, fix: fix.source },
+    sources: {
+      build: build.source,
+      review: review.source,
+      rereview: rereview.source,
+      fix: fix.source,
+    },
   };
+}
+
+/** `rereview` is review round 2 and later; earlier review rounds use `review`. */
+export function stageModelKeyForRun(
+  stage: "building" | "reviewing" | "fixing",
+  reviewRound: number,
+): keyof ResolvedStageModels {
+  if (stage === "building") return "build";
+  if (stage === "fixing") return "fix";
+  return reviewRound >= 2 ? "rereview" : "review";
 }
 
 export function modelForActiveStage(
@@ -114,9 +144,11 @@ export function modelForActiveStage(
 ): string {
   const models = job.stageModels;
   if (!models) return job.model;
-  if (stage === "building") return job.stageModelActual?.build ?? models.build;
-  if (stage === "reviewing") return job.stageModelActual?.review ?? models.review;
-  return job.stageModelActual?.fix ?? models.fix;
+  const key = stageModelKeyForRun(stage, job.reviewRound);
+  const actual = job.stageModelActual?.[key];
+  if (actual) return actual;
+  if (key === "rereview") return models.rereview || models.review;
+  return models[key];
 }
 
 export function recordActualModel(

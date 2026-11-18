@@ -80,7 +80,7 @@ describe("job-type watchdog", () => {
     const compute: JobRecord = {
       effectiveSnapshot: {
         maxRounds: 2,
-        stageModels: { build: "m", review: "m", fix: "m" },
+        stageModels: { build: "m", review: "m", rereview: "m", fix: "m" },
         baseRef: "main",
         watchdogInactivityMs: COMPUTE_JOB_DEFAULT_WATCHDOG.inactivityMs,
         watchdogStageCapMs: COMPUTE_JOB_DEFAULT_WATCHDOG.stageCapMs,
@@ -90,7 +90,7 @@ describe("job-type watchdog", () => {
     const code: JobRecord = {
       effectiveSnapshot: {
         maxRounds: 2,
-        stageModels: { build: "m", review: "m", fix: "m" },
+        stageModels: { build: "m", review: "m", rereview: "m", fix: "m" },
         baseRef: "main",
         watchdogInactivityMs: 15 * 60_000,
         watchdogStageCapMs: 120 * 60_000,
