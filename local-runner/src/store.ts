@@ -366,6 +366,7 @@ export async function createJob(
       linearIssue: ticket.linearIssue,
       branch: args.branch,
       promptFile: promptFile || args.promptFile || "",
+      repoPath: target.repoPath,
     })) ||
     args.branch.trim() ||
     id.slice(0, 8);
