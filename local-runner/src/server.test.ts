@@ -16,7 +16,8 @@ import { BranchConflictError } from "./job-queue.js";
 import { archivedJobFile, archivedLogFile, jobFile, jobLogFile } from "./paths.js";
 import { saveSettings } from "./settings.js";
 import { loadJob, saveJob } from "./store.js";
-import type { JobRecord, JobStage } from "./types.js";
+import { workerBudgetForJob } from "./job-worker-monitor.js";
+import type { JobEffectiveSnapshot, JobRecord, JobStage } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -1044,5 +1045,148 @@ describe("continue job over HTTP and MCP", () => {
     } as unknown as RunnerEngine;
     await handleContinueJobRequest(engine, "job-1", { prompt: "x" });
     assert.deepEqual(captured[0], { prompt: "x", id: "job-1" });
+  });
+});
+
+describe("extend running job watchdog over HTTP and MCP (#216)", () => {
+  function withSnapshot(record: JobRecord, snap: Partial<JobEffectiveSnapshot> = {}): JobRecord {
+    record.effectiveSnapshot = {
+      maxRounds: record.maxRounds,
+      stageModels: { build: "m", review: "m", rereview: "m", fix: "m" },
+      baseRef: "main",
+      watchdogInactivityMs: 15 * 60_000,
+      watchdogStageCapMs: 7_200_000,
+      watchdogRecoveryAttempts: 1,
+      ...snap,
+    };
+    record.watchdog = {
+      lastActivityAt: new Date().toISOString(),
+      stageStartedAt: new Date().toISOString(),
+      recoveryAttemptsUsed: 1,
+      lastRecoveryAt: null,
+      lastStallReason: null,
+    };
+    return record;
+  }
+
+  it("requires bearer auth", async () => {
+    const s = await startTestServer();
+    try {
+      await seedJob(s.dataDir, "job-1", "building");
+      const res = await httpRequest(s.port, "POST", "/api/jobs/job-1/watchdog", {
+        body: JSON.stringify({ grantRecovery: true }),
+      });
+      assert.equal(res.status, 401);
+    } finally {
+      await s.close();
+    }
+  });
+
+  it("raises the cap or grants a recovery and recomputes the stage budget", async () => {
+    const s = await startTestServer();
+    try {
+      await seedJob(s.dataDir, "job-run", "building");
+      const seeded = withSnapshot((await loadJob(s.dataDir, "job-run"))!);
+      const budgetBefore = workerBudgetForJob(seeded).stageBudgetMs;
+      const elapsed = Math.floor(budgetBefore * 0.85);
+      seeded.watchdog!.stageStartedAt = new Date(Date.now() - elapsed).toISOString();
+      await saveJob(s.dataDir, seeded);
+
+      const before = await httpRequest(s.port, "GET", "/api/jobs/job-run", { token: TOKEN });
+      const beforeBody = JSON.parse(before.body) as {
+        watchdogCapApproaching?: boolean;
+        activityMessage?: string;
+      };
+      assert.equal(beforeBody.watchdogCapApproaching, true);
+      assert.match(beforeBody.activityMessage ?? "", /cap approaching/);
+
+      const res = await httpRequest(s.port, "POST", "/api/jobs/job-run/watchdog", {
+        token: TOKEN,
+        body: JSON.stringify({ id: "other-job", stageCapMs: 28_800_000, grantRecovery: true }),
+      });
+      assert.equal(res.status, 200);
+      const body = JSON.parse(res.body) as {
+        id: string;
+        watchdogStageCapMs: number;
+        watchdogRecoveryAttempts: number;
+        previousStageCapMs: number;
+        previousRecoveryAttempts: number;
+        stageBudgetMs: number;
+        watchdogCapApproaching: boolean;
+      };
+      assert.equal(body.id, "job-run");
+      assert.equal(body.previousStageCapMs, 7_200_000);
+      assert.equal(body.previousRecoveryAttempts, 1);
+      assert.equal(body.watchdogStageCapMs, 28_800_000);
+      assert.equal(body.watchdogRecoveryAttempts, 2);
+      assert.equal(body.watchdogCapApproaching, false);
+      const stored = (await loadJob(s.dataDir, "job-run"))!;
+      assert.equal(body.stageBudgetMs, workerBudgetForJob(stored).stageBudgetMs);
+      assert.ok(body.stageBudgetMs > budgetBefore);
+
+      const after = await httpRequest(s.port, "GET", "/api/jobs/job-run", { token: TOKEN });
+      const afterBody = JSON.parse(after.body) as { watchdogCapApproaching?: boolean };
+      assert.equal(afterBody.watchdogCapApproaching, false);
+
+      const lower = await httpRequest(s.port, "POST", "/api/jobs/job-run/watchdog", {
+        token: TOKEN,
+        body: JSON.stringify({ stageCapMs: 7_200_000 }),
+      });
+      assert.equal(lower.status, 400);
+      assert.match(lower.body, /at least the current cap/);
+      assert.equal(
+        (await loadJob(s.dataDir, "job-run"))!.effectiveSnapshot?.watchdogStageCapMs,
+        28_800_000,
+      );
+
+      const mcp = await mcpCall(s.port, "extend_job_watchdog", {
+        id: "job-run",
+        grantRecovery: true,
+      });
+      assert.equal(mcp.error, undefined);
+      assert.equal(mcp.result?.structuredContent.watchdogRecoveryAttempts, 3);
+      assert.equal(mcp.result?.structuredContent.watchdogStageCapMs, 28_800_000);
+
+      await seedJob(s.dataDir, "job-done", "stuck");
+      const terminal = await httpRequest(s.port, "POST", "/api/jobs/job-done/watchdog", {
+        token: TOKEN,
+        body: JSON.stringify({ grantRecovery: true }),
+      });
+      assert.equal(terminal.status, 409);
+      assert.match(terminal.body, /not running/);
+
+      await seedJob(s.dataDir, "job-arch", "approved");
+      assert.equal(
+        (await httpRequest(s.port, "POST", "/api/jobs/job-arch/archive", { token: TOKEN })).status,
+        200,
+      );
+      const archived = await httpRequest(s.port, "POST", "/api/jobs/job-arch/watchdog", {
+        token: TOKEN,
+        body: JSON.stringify({ grantRecovery: true }),
+      });
+      assert.equal(archived.status, 409);
+      assert.match(archived.body, /archived/);
+
+      const missing = await httpRequest(s.port, "POST", "/api/jobs/missing-job/watchdog", {
+        token: TOKEN,
+        body: JSON.stringify({ grantRecovery: true }),
+      });
+      assert.equal(missing.status, 404);
+
+      const badId = await httpRequest(s.port, "POST", "/api/jobs/has.dot/watchdog", {
+        token: TOKEN,
+        body: JSON.stringify({ grantRecovery: true }),
+      });
+      assert.equal(badId.status, 400);
+
+      const empty = await httpRequest(s.port, "POST", "/api/jobs/job-run/watchdog", {
+        token: TOKEN,
+        body: JSON.stringify({}),
+      });
+      assert.equal(empty.status, 400);
+      assert.match(empty.body, /stageCapMs or grantRecovery/);
+    } finally {
+      await s.close();
+    }
   });
 });

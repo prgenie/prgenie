@@ -12,6 +12,7 @@ import {
 } from "./notify-settings.js";
 import { loadSettings, saveSettings, SettingsConflictError, toPublicSettings } from "./settings.js";
 import { ContinueJobError } from "./job-continue.js";
+import { ExtendWatchdogError } from "./watchdog-extend.js";
 import {
   normalizeStartJobArgs,
   parseSettingsPatch,
@@ -69,10 +70,18 @@ const CONTINUE_ERROR_STATUS: Record<ContinueJobError["code"], number> = {
   rate_limited: 429,
 };
 
+const EXTEND_WATCHDOG_ERROR_STATUS: Record<ExtendWatchdogError["code"], number> = {
+  invalid_id: 400,
+  not_found: 404,
+  archived: 409,
+  not_running: 409,
+};
+
 /** Validation is 400, a settings or branch conflict is 409, anything else is a server fault. */
 function errorStatus(err: unknown): number {
   if (err instanceof ValidationError) return 400;
   if (err instanceof ContinueJobError) return CONTINUE_ERROR_STATUS[err.code];
+  if (err instanceof ExtendWatchdogError) return EXTEND_WATCHDOG_ERROR_STATUS[err.code];
   if (err instanceof SettingsConflictError || err instanceof BranchConflictError) return 409;
   return 500;
 }
@@ -98,6 +107,24 @@ export async function handleContinueJobRequest(
     return {
       status: errorStatus(err),
       body: { error: safeHandlerMessage(err), ...stage, ...rate },
+    };
+  }
+}
+
+/** POST /api/jobs/:id/watchdog: same parser as MCP extend_job_watchdog. */
+export async function handleExtendWatchdogRequest(
+  engine: RunnerEngine,
+  jobId: string,
+  payload: Record<string, unknown>,
+): Promise<{ status: number; body: unknown }> {
+  try {
+    const body = await engine.extendWatchdog({ ...payload, id: jobId });
+    return { status: 200, body };
+  } catch (err) {
+    const stage = err instanceof ExtendWatchdogError && err.stage ? { stage: err.stage } : {};
+    return {
+      status: errorStatus(err),
+      body: { error: safeHandlerMessage(err), ...stage },
     };
   }
 }
@@ -492,6 +519,15 @@ export function startHttpServer(
           return;
         }
         guard.json(200, { ok: true, id: result.id, stage: result.job.stage });
+        return;
+      }
+
+      const watchdogMatch = path.match(/^\/api\/jobs\/([^/]+)\/watchdog$/);
+      if (watchdogMatch && req.method === "POST") {
+        const payload = await readJsonObject(req, guard);
+        if (!payload || guard.started) return;
+        const reply = await handleExtendWatchdogRequest(engine, watchdogMatch[1], payload);
+        guard.json(reply.status, reply.body);
         return;
       }
 

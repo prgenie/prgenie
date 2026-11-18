@@ -72,7 +72,7 @@ export const RUNNER_MCP_TOOLS = [
         watchdog: {
           type: "object",
           description:
-            "Optional per-job watchdog override (inactivityMs, stageCapMs, recoveryAttempts); frozen at start",
+            "Optional per-job watchdog override (inactivityMs, stageCapMs, recoveryAttempts); snapshotted at start. Raise a running job with extend_job_watchdog",
         },
         docsTemplate: {
           type: "string",
@@ -177,6 +177,27 @@ export const RUNNER_MCP_TOOLS = [
     },
   },
   {
+    name: "extend_job_watchdog",
+    description:
+      "Extend a running job's watchdog snapshot: raise stageCapMs (up to 8h) and/or grant one recovery attempt. Recomputes the worker monitor's stage budget.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        stageCapMs: {
+          type: "number",
+          description:
+            "New stage cap in milliseconds (300000–28800000). Must be at least the job's current cap.",
+        },
+        grantRecovery: {
+          type: "boolean",
+          description: "When true, add one recovery attempt (maximum 3).",
+        },
+      },
+      required: ["id"],
+    },
+  },
+  {
     name: "restart_runner",
     description:
       "Graceful runner restart: HTTP server exits so you can rebuild/relaunch; in-flight jobs keep running in detached workers and are re-adopted on the next serve.",
@@ -235,6 +256,7 @@ const RUNNER_TOOL_HANDLERS: Record<string, ToolHandler> = {
     return { ok: true, id: result.id, stage: result.job.stage };
   },
   continue_job: (engine, args) => engine.continueJob({ ...normalizeContinueJobArgs(args) }),
+  extend_job_watchdog: (engine, args) => engine.extendWatchdog(args),
   restart_runner: async (engine) => engine.prepareRestart(),
   settings: async (engine, args) => {
     const dataDir = engine.config.dataDir;

@@ -4,7 +4,8 @@ import { WATCHDOG_CHILD_GRACE_MS } from "./runner-policy.js";
 export type WatchdogClock = () => number;
 
 export type StageWatchdogOptions = {
-  policy: WatchdogPolicy;
+  /** Static policy, or a live read so an in-flight extension is picked up before the next check. */
+  policy: WatchdogPolicy | (() => WatchdogPolicy);
   now?: WatchdogClock;
   tickMs?: number;
   /** How long a killed child may take to exit before the watchdog stops waiting for it. */
@@ -17,7 +18,13 @@ export type StageWatchdogOptions = {
   pollActivity?: () => boolean;
   /** Fires whenever inactivity is refreshed (log line or pollActivity). */
   onActivity?: () => void;
+  /** Pull a raised on-disk cap into memory before each check and before a recovery decision. */
+  refreshPolicy?: () => void | Promise<void>;
 };
+
+function resolvePolicy(opts: StageWatchdogOptions): WatchdogPolicy {
+  return typeof opts.policy === "function" ? opts.policy() : opts.policy;
+}
 
 /** True when a stream-json or agent log line indicates meaningful progress (not CI noise). */
 export function isMeaningfulAgentLine(line: string): boolean {
@@ -63,8 +70,9 @@ export function startStageWatchdogMonitor(opts: StageWatchdogOptions): StageWatc
     opts.onActivity?.();
   };
 
-  const timer = setInterval(() => {
+  const evaluate = () => {
     if (!running) return;
+    const policy = resolvePolicy(opts);
     const t = now();
     if (opts.pollActivity?.()) noteActivity();
     if (killedAt != null) {
@@ -72,15 +80,35 @@ export function startStageWatchdogMonitor(opts: StageWatchdogOptions): StageWatc
       if (t - killedAt >= childGraceMs) abandon?.();
       return;
     }
-    if (t - stageStarted >= opts.policy.stageCapMs) {
-      stallReason = `stage exceeded hard cap (${opts.policy.stageCapMs}ms)`;
-    } else if (t - lastActivity >= opts.policy.inactivityMs) {
-      stallReason = `no meaningful agent activity for ${opts.policy.inactivityMs}ms`;
+    if (t - stageStarted >= policy.stageCapMs) {
+      stallReason = `stage exceeded hard cap (${policy.stageCapMs}ms)`;
+    } else if (t - lastActivity >= policy.inactivityMs) {
+      stallReason = `no meaningful agent activity for ${policy.inactivityMs}ms`;
     } else {
       return;
     }
     killedAt = t;
     opts.killChild();
+  };
+
+  let chain: Promise<void> = Promise.resolve();
+  const timer = setInterval(() => {
+    if (!running) return;
+    if (!opts.refreshPolicy) {
+      evaluate();
+      return;
+    }
+    chain = chain
+      .then(async () => {
+        if (!running) return;
+        try {
+          await opts.refreshPolicy?.();
+        } catch {
+          // A failed refresh keeps the cap already in memory.
+        }
+        if (running) evaluate();
+      })
+      .catch(() => undefined);
   }, tickMs);
   if (typeof timer === "object" && "unref" in timer) timer.unref();
 
@@ -122,7 +150,6 @@ export async function runAgentWithWatchdog<T>(
   runOnce: (onLine: (line: string) => void) => Promise<T>,
 ): Promise<StageWatchdogResult<T>> {
   let recoveryAttempts = 0;
-  const maxRecovery = opts.policy.recoveryAttempts;
 
   while (true) {
     const monitor = startStageWatchdogMonitor(opts);
@@ -130,6 +157,12 @@ export async function runAgentWithWatchdog<T>(
     const { value, stallReason } = await monitor.awaitRun(run);
     if (stallReason) {
       opts.onStall?.(stallReason);
+      try {
+        await opts.refreshPolicy?.();
+      } catch {
+        // A failed refresh keeps the cap already in memory.
+      }
+      const maxRecovery = resolvePolicy(opts).recoveryAttempts;
       if (recoveryAttempts < maxRecovery) {
         recoveryAttempts += 1;
         opts.onRecovery?.(recoveryAttempts, stallReason);

@@ -4,6 +4,18 @@ import { handleRunnerTool, RUNNER_MCP_TOOLS } from "./mcp-handlers.js";
 import type { RunnerEngine } from "./engine.js";
 import type { JobRecord } from "./types.js";
 
+describe("extend_job_watchdog MCP schema", () => {
+  it("lists id and the cap or recovery fields", () => {
+    const tool = RUNNER_MCP_TOOLS.find((t) => t.name === "extend_job_watchdog");
+    assert.ok(tool);
+    assert.deepEqual(tool!.inputSchema.required, ["id"]);
+    const props = tool!.inputSchema.properties as Record<string, { description?: string }>;
+    assert.match(String(props.stageCapMs.description), /28800000/);
+    assert.match(String(props.grantRecovery.description), /recovery attempt/);
+    assert.match(tool!.description, /stage budget/);
+  });
+});
+
 describe("continue_job MCP schema", () => {
   it("lists required id and optional continue fields", () => {
     const tool = RUNNER_MCP_TOOLS.find((t) => t.name === "continue_job");

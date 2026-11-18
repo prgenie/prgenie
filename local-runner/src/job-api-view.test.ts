@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { enrichJobPublicView, jobActivityMessage } from "./job-api-view.js";
-import type { JobRecord } from "./types.js";
+import { workerBudgetForJob } from "./job-worker-monitor.js";
+import type { JobEffectiveSnapshot, JobRecord } from "./types.js";
 
 function job(partial: Partial<JobRecord> = {}): JobRecord {
   return {
@@ -59,6 +60,43 @@ describe("enrichJobPublicView", () => {
       jobActivityMessage(job({ stage: "building", worktreePath: null })),
       "Preparing worktree",
     );
+  });
+
+  it("surfaces cap approaching once the stage has used most of its budget (#216)", () => {
+    const snap: JobEffectiveSnapshot = {
+      maxRounds: 2,
+      stageModels: { build: "m", review: "m", rereview: "m", fix: "m" },
+      baseRef: "main",
+      watchdogInactivityMs: 15 * 60_000,
+      watchdogStageCapMs: 120 * 60_000,
+      watchdogRecoveryAttempts: 1,
+    };
+    const running = job({
+      effectiveSnapshot: snap,
+      watchdog: {
+        lastActivityAt: "2026-11-11T04:45:00.000Z",
+        stageStartedAt: "2026-11-11T00:00:00.000Z",
+        recoveryAttemptsUsed: 1,
+        lastRecoveryAt: "2026-11-11T02:00:00.000Z",
+        lastStallReason: null,
+      },
+    });
+    const budget = workerBudgetForJob(running).stageBudgetMs;
+    const started = Date.parse(running.watchdog!.stageStartedAt!);
+    const under = enrichJobPublicView(running, { nowMs: started + Math.floor(budget * 0.5) });
+    assert.equal(under.watchdogCapApproaching, false);
+    assert.equal(under.activityMessage, "Preparing worktree");
+    const over = enrichJobPublicView(running, { nowMs: started + Math.floor(budget * 0.85) });
+    assert.equal(over.watchdogCapApproaching, true);
+    assert.match(over.activityMessage ?? "", /cap approaching/);
+    const raised = enrichJobPublicView(
+      job({
+        ...running,
+        effectiveSnapshot: { ...snap, watchdogStageCapMs: 8 * 60 * 60 * 1000 },
+      }),
+      { nowMs: started + Math.floor(budget * 0.85) },
+    );
+    assert.equal(raised.watchdogCapApproaching, false);
   });
 
   it("surfaces statusDetail for GitHub rate-limit waits (#223)", () => {

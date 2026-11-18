@@ -52,7 +52,7 @@ export interface JobInput {
   profile?: JobProfile;
   /** Built-in docs template when jobType is docs. */
   docsTemplate?: "marketing" | "policy" | "research";
-  /** Per-job watchdog override (frozen into effectiveSnapshot at creation). */
+  /** Per-job watchdog override. Snapshotted at creation; a running job can raise it via extend_job_watchdog. */
   watchdog?: {
     inactivityMs?: number;
     stageCapMs?: number;
