@@ -32,7 +32,7 @@ export type WorkerSuperviseOutcome =
 
 export type WorkerBudget = { heartbeatStaleMs: number; stageBudgetMs: number };
 
-/** Liveness thresholds derived from the job's own watchdog snapshot (not live Setup values). */
+/** Liveness thresholds from the job's watchdog snapshot, including a cap extended while it runs. */
 export function workerBudgetForJob(job: JobRecord): WorkerBudget {
   const snap = job.effectiveSnapshot;
   const policy = snap

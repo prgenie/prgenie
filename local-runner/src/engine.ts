@@ -1,7 +1,7 @@
 import type { RunnerConfig } from "./config.js";
 import { CiWatcher, type CiWatcherDeps } from "./ci-watcher.js";
 import { runJobLoop } from "./job-runner.js";
-import { enrichJobPublicView, type JobPublicView } from "./job-api-view.js";
+import { enrichJobPublicView, watchdogCapApproaching, type JobPublicView } from "./job-api-view.js";
 import { JobControl } from "./job-control.js";
 import {
   archiveJob,
@@ -18,6 +18,7 @@ import {
   listJobsForDisplay,
   loadArchivedJob,
   loadJob,
+  patchJob,
   resolveJobRepoSlug,
   saveJob,
 } from "./store.js";
@@ -50,12 +51,21 @@ import { spawnDetachedJobWorker } from "./job-worker-spawn.js";
 import {
   superviseDetachedWorker,
   waitForWorkerClaim,
+  workerBudgetForJob,
   workerSignalSafe,
   type WorkerSuperviseOptions,
 } from "./job-worker-monitor.js";
+import { isSafeJobId } from "./paths.js";
+import {
+  applyWatchdogExtension,
+  formatWatchdogExtensionLog,
+  parseExtendWatchdogRequest,
+  ExtendWatchdogError,
+  type ExtendWatchdogResult,
+} from "./watchdog-extend.js";
 import { liveWorkerLock, readWorkerLock } from "./job-worker-lock.js";
 import { inspectRestartState } from "./runner-restart.js";
-import { stat } from "node:fs/promises";
+import { appendFile, stat } from "node:fs/promises";
 
 const ACTIVE_STAGES = new Set(["building", "reviewing", "fixing"]);
 
@@ -463,6 +473,49 @@ export class RunnerEngine extends EventEmitter {
       reviewRound: result.job.reviewRound,
       worktree: result.worktree,
       queued: result.queued,
+    };
+  }
+
+  /**
+   * Raise a running job's snapshotted stage cap (up to 8h) and/or grant one recovery.
+   * The detached-worker supervisor recomputes its stage budget from the updated snapshot.
+   */
+  async extendWatchdog(raw: Record<string, unknown>): Promise<ExtendWatchdogResult> {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      throw new ValidationError("watchdog extension must be an object");
+    }
+    const id = typeof raw.id === "string" ? raw.id.trim() : "";
+    if (!id) throw new ValidationError("id is required");
+    if (!isSafeJobId(id)) throw new ExtendWatchdogError(`invalid job id: ${id}`, "invalid_id");
+    const request = parseExtendWatchdogRequest(raw);
+    const applied: { change?: ReturnType<typeof applyWatchdogExtension> } = {};
+    const updated = await patchJob(this.config.dataDir, id, (job) => {
+      applied.change = applyWatchdogExtension(job, request);
+    });
+    const change = applied.change;
+    if (!updated || !change) {
+      const archived = await loadArchivedJob(this.config.dataDir, id);
+      if (archived) {
+        throw new ExtendWatchdogError(
+          `job is archived; restore it before extending the watchdog: ${id}`,
+          "archived",
+        );
+      }
+      throw new ExtendWatchdogError(`job not found: ${id}`, "not_found");
+    }
+    await appendFile(updated.logPath, formatWatchdogExtensionLog(change)).catch(() => undefined);
+    this.emitJobsChanged();
+    const snap = updated.effectiveSnapshot;
+    return {
+      ok: true,
+      id: updated.id,
+      stage: updated.stage,
+      watchdogStageCapMs: snap?.watchdogStageCapMs ?? change.stageCapMs,
+      watchdogRecoveryAttempts: snap?.watchdogRecoveryAttempts ?? change.recoveryAttempts,
+      previousStageCapMs: change.previousStageCapMs,
+      previousRecoveryAttempts: change.previousRecoveryAttempts,
+      stageBudgetMs: workerBudgetForJob(updated).stageBudgetMs,
+      watchdogCapApproaching: watchdogCapApproaching(updated),
     };
   }
 

@@ -29,6 +29,7 @@ import { mergeJobErrors } from "./job-error.js";
 import { resolveStageModelsForJob } from "./job-models.js";
 import type { CiStatusInfo } from "./types.js";
 import { withStoreLock } from "./store-lock.js";
+import { adoptRaisedWatchdog } from "./watchdog-extend.js";
 
 export async function ensureDataDirs(dataDir: string): Promise<void> {
   const jd = jobsDir(dataDir);
@@ -93,6 +94,8 @@ export async function saveJob(dataDir: string, job: JobRecord): Promise<void> {
       if (onDisk.updatedAt > (loadedAt ?? "")) {
         job.error = mergeJobErrors(onDisk.error, job.error);
       }
+      // A running worker's copy predates extend_job_watchdog; keep the higher cap and recovery count.
+      adoptRaisedWatchdog(job, onDisk);
     }
     await atomicWriteJson(livePath, job);
     // The clear is consumed: re-saving this copy after a new claim must not wipe that claim.

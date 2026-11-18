@@ -190,6 +190,68 @@ describe("stage watchdog", () => {
     assert.ok(runner.kills >= 1);
   });
 
+  it("honors a stage cap raised before the hard cap fires", async () => {
+    let now = 0;
+    const policy = { inactivityMs: 60_000, stageCapMs: 80, recoveryAttempts: 0 };
+    let killed = false;
+    let refreshes = 0;
+    const clock = setInterval(() => {
+      now += 25;
+    }, 5);
+    const res = await runAgentWithWatchdog(
+      {
+        policy: () => policy,
+        now: () => now,
+        tickMs: 5,
+        childGraceMs: 30,
+        killChild: () => {
+          killed = true;
+        },
+        refreshPolicy: () => {
+          refreshes += 1;
+          policy.stageCapMs = 60_000;
+        },
+      },
+      async () => {
+        while (now < 400) await new Promise((r) => setTimeout(r, 5));
+        return { code: 0, output: "ok" };
+      },
+    ).finally(() => clearInterval(clock));
+    assert.ok(refreshes > 0);
+    assert.equal(killed, false);
+    assert.equal(res.ok, true);
+  });
+
+  it("uses a recovery granted before a stall is treated as final", async () => {
+    let now = 0;
+    const policy = { inactivityMs: 3_600_000, stageCapMs: 80, recoveryAttempts: 0 };
+    let calls = 0;
+    const clock = setInterval(() => {
+      now += 25;
+    }, 5);
+    const res = await runAgentWithWatchdog(
+      {
+        policy: () => policy,
+        now: () => now,
+        tickMs: 5,
+        childGraceMs: 20,
+        killChild: () => undefined,
+        onStall: () => {
+          policy.recoveryAttempts = 1;
+          policy.stageCapMs = 60_000;
+        },
+      },
+      () => {
+        calls += 1;
+        if (calls === 1) return new Promise<never>(() => undefined);
+        return Promise.resolve({ code: 0, output: "ok" });
+      },
+    ).finally(() => clearInterval(clock));
+    assert.equal(res.ok, true);
+    assert.equal(calls, 2);
+    if (res.ok) assert.equal(res.recoveryAttempts, 1);
+  });
+
   it("gives up on a child that ignores kill once the grace period expires", async () => {
     let now = 0;
     let kills = 0;

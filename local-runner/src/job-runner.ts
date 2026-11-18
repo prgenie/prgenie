@@ -32,7 +32,7 @@ import {
   loadSettings,
   resolveNotifyRecipient,
 } from "./notify-settings.js";
-import { readLogTail, saveJob } from "./store.js";
+import { loadJob, readLogTail, saveJob } from "./store.js";
 import type { JobEvent, JobRecord, JobStage } from "./types.js";
 import { sumTokenUsageFromLog } from "./usage.js";
 import {
@@ -45,6 +45,7 @@ import { branchExistsOnOrigin, worktreePathExists } from "./worktree-cleanup.js"
 import { cursorWorktreeDir } from "./paths.js";
 import { fetchPrViewInfo, readHeadSha } from "./draft-pr.js";
 import { runAgentWithWatchdog, type StageWatchdogOptions } from "./stage-watchdog.js";
+import { adoptRaisedWatchdog } from "./watchdog-extend.js";
 import { isComputeJob } from "./job-type-watchdog.js";
 import { createProcessActivitySampler } from "./watchdog-process-activity.js";
 import { trackShellToolLine, type ShellToolTracker } from "./stream-json-log.js";
@@ -135,6 +136,14 @@ async function notify(
   }
 }
 
+async function refreshExtendedWatchdog(config: RunnerConfig, job: JobRecord): Promise<void> {
+  try {
+    adoptRaisedWatchdog(job, await loadJob(config.dataDir, job.id));
+  } catch {
+    // A torn or missing read keeps the cap already in memory.
+  }
+}
+
 function watchdogPolicyForJob(job: JobRecord, settings: Awaited<ReturnType<typeof loadSettings>>) {
   const snap = job.effectiveSnapshot;
   if (snap) {
@@ -167,7 +176,7 @@ async function runAgentStage(
   opts: Parameters<AgentRunner["run"]>[0],
   timing?: WatchdogTiming,
 ): Promise<{ code: number; output: string } | null> {
-  const policy = watchdogPolicyForJob(job, settings);
+  const policy = () => watchdogPolicyForJob(job, settings);
   job.watchdog = job.watchdog ?? {
     lastActivityAt: null,
     stageStartedAt: null,
@@ -217,6 +226,7 @@ async function runAgentStage(
     {
       ...timing,
       policy,
+      refreshPolicy: () => refreshExtendedWatchdog(config, job),
       killChild: () => runner.kill(),
       pollActivity: procSampler
         ? () => {
