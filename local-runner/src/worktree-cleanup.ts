@@ -219,9 +219,12 @@ export async function maybeCleanupJobWorktree(
   job: JobRecord,
   nowMs = Date.now(),
   log?: (msg: string) => void,
+  opts: { skipMergeSync?: boolean } = {},
 ): Promise<void> {
   try {
-    await syncJobMergedStatus(config.dataDir, job, fetchPrMerged);
+    // The CI watcher already learns merge state from its own (throttled) PR fetch, so it skips
+    // this extra REST call; calling it every tick for every job drained the quota (#236).
+    if (!opts.skipMergeSync) await syncJobMergedStatus(config.dataDir, job, fetchPrMerged);
     let reason = worktreeCleanupReason(job, nowMs);
     if (!reason && (job.stage === "failed" || job.stage === "stopped") && job.worktreePath) {
       const cwd = resolveJobSpawnCwd(job);

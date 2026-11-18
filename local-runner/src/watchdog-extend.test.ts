@@ -21,7 +21,7 @@ import {
 function snapshot(partial: Partial<JobEffectiveSnapshot> = {}): JobEffectiveSnapshot {
   return {
     maxRounds: 3,
-    stageModels: { build: "m", review: "m", fix: "m" },
+    stageModels: { build: "m", review: "m", rereview: "m", fix: "m" },
     baseRef: "main",
     watchdogInactivityMs: 60 * 60_000,
     watchdogStageCapMs: 30 * 60_000,

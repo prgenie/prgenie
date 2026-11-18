@@ -378,15 +378,48 @@ const CI_ACTIVE_STAGES = new Set(["building", "reviewing", "fixing", "approved"]
 
 const MERGE_WATCH_STAGES = new Set(["approved", "changes_remaining", "stuck", "failed", "stopped"]);
 
-export function shouldPollCi(job: JobRecord): boolean {
+/** Settled merge-watch jobs (CI not pending) are re-checked at most this often (#236). */
+export const CI_SETTLED_POLL_MS = 15 * 60_000;
+/** Settled jobs untouched for longer than CI_STALE_AFTER_MS are re-checked hourly. */
+export const CI_STALE_POLL_MS = 60 * 60_000;
+export const CI_STALE_AFTER_MS = 24 * 60 * 60_000;
+/** Settled jobs untouched for longer than this are no longer polled at all. */
+export const CI_GIVE_UP_AFTER_MS = 7 * 24 * 60 * 60_000;
+
+function msSince(iso: string | null | undefined, nowMs: number): number | null {
+  if (!iso) return null;
+  const t = Date.parse(iso);
+  return Number.isFinite(t) ? nowMs - t : null;
+}
+
+/** True when this job needs fresh CI data urgently (watched every tick, even when REST quota is low). */
+export function isCiPollUrgent(job: JobRecord): boolean {
+  if (job.ciStatus?.status === "pending") return true;
+  return job.stage === "building" || job.stage === "reviewing" || job.stage === "fixing";
+}
+
+export function shouldPollCi(job: JobRecord, nowMs = Date.now()): boolean {
   if (job.input.jobType === "docs" || job.input.profile === "docs") return false;
 
   const hasPr = job.prNumber != null || job.prUrl != null;
   if (!hasPr) return false;
 
+  if (job.archivedAt) return false;
+
   if (isMergedStatus(job)) return false;
 
-  if (MERGE_WATCH_STAGES.has(job.stage)) return true;
+  // A closed (unmerged) PR is terminal: polling it forever burned the REST quota (#236).
+  if (job.ciStatus?.status === "closed") return false;
+
+  if (MERGE_WATCH_STAGES.has(job.stage)) {
+    if (job.ciStatus?.status === "pending") return true;
+    const idle = msSince(job.updatedAt, nowMs);
+    if (idle != null && idle > CI_GIVE_UP_AFTER_MS) return false;
+    const interval =
+      idle != null && idle > CI_STALE_AFTER_MS ? CI_STALE_POLL_MS : CI_SETTLED_POLL_MS;
+    const since = msSince(job.ciStatus?.checkedAt, nowMs);
+    return since == null || since >= interval;
+  }
 
   if (job.ciStatus && isCiFinal(job.ciStatus.status)) {
     return false;

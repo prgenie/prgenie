@@ -28,11 +28,25 @@ export function watchdogCapApproaching(job: JobRecord, nowMs = Date.now()): bool
   return elapsed >= workerBudgetForJob(job).stageBudgetMs * WATCHDOG_CAP_APPROACH_RATIO;
 }
 
+function formatStatusDetail(detail: NonNullable<JobRecord["statusDetail"]>): string {
+  if (detail.until) {
+    const t = Date.parse(detail.until);
+    const untilLabel = Number.isNaN(t)
+      ? detail.until
+      : new Date(t).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+    return `${detail.reason} until ${untilLabel}`;
+  }
+  return detail.reason;
+}
+
 function jobActivityMessageBase(job: JobRecord): string | null {
   const queued = Boolean(job.queueState?.queued);
   if (queued) {
     const pos = job.queueState?.position;
     return pos != null ? `Queued (position ${pos})` : "Queued";
+  }
+  if (job.statusDetail?.reason) {
+    return formatStatusDetail(job.statusDetail);
   }
   if (!ACTIVE_STAGES.has(job.stage) || job.stopRequested) return null;
   if (!job.dryRun && !job.worktreePath) {

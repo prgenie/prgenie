@@ -5,6 +5,7 @@ import http from "node:http";
 import net from "node:net";
 import path from "node:path";
 import type { RunnerConfig } from "./config.js";
+import { formatRunnerBindTarget, urlHostForRequest } from "./listen-urls.js";
 import { liveWorkerLock, readWorkerLock } from "./job-worker-lock.js";
 import { listJobs } from "./store.js";
 import type { JobRecord } from "./types.js";
@@ -217,6 +218,9 @@ export async function runRunnerRestartCli(
   const log = deps.log ?? ((m: string) => console.log(m));
   const error = deps.error ?? ((m: string) => console.error(m));
   const { host, port, token } = opts;
+  // Probes need a connectable address; messages name the host the server binds.
+  const dialHost = urlHostForRequest(host);
+  const where = formatRunnerBindTarget(host, port);
 
   if (opts.build) {
     const root = findBuildRoot(opts.entry);
@@ -235,7 +239,7 @@ export async function runRunnerRestartCli(
 
   let oldServerUp = true;
   try {
-    const res = await (deps.callRestart ?? httpCallRunnerRestart)(host, port, token);
+    const res = await (deps.callRestart ?? httpCallRunnerRestart)(dialHost, port, token);
     if (res.status !== 200) {
       const detail = bodyError(res.body);
       error(`Runner refused restart: HTTP ${res.status}${detail ? ` (${detail})` : ""}`);
@@ -250,16 +254,16 @@ export async function runRunnerRestartCli(
     log(`No runner on ${host}:${port}; starting one.`);
   }
 
-  if (oldServerUp && !(await (deps.waitForPortFree ?? waitForPortFree)(host, port))) {
+  if (oldServerUp && !(await (deps.waitForPortFree ?? waitForPortFree)(dialHost, port))) {
     error(`Old runner still holds ${host}:${port}; not launching a second one.`);
     return 1;
   }
 
   deps.launch();
-  if (!(await (deps.waitForUp ?? waitForHttpRunner)(host, port, token))) {
+  if (!(await (deps.waitForUp ?? waitForHttpRunner)(dialHost, port, token))) {
     error("Runner did not come back up after restart.");
     return 1;
   }
-  log(`Runner restarted on ${host}:${port}`);
+  log(`Runner restarted on ${where}`);
   return 0;
 }

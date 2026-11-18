@@ -65,7 +65,7 @@ describe("enrichJobPublicView", () => {
   it("surfaces cap approaching once the stage has used most of its budget (#216)", () => {
     const snap: JobEffectiveSnapshot = {
       maxRounds: 2,
-      stageModels: { build: "m", review: "m", fix: "m" },
+      stageModels: { build: "m", review: "m", rereview: "m", fix: "m" },
       baseRef: "main",
       watchdogInactivityMs: 15 * 60_000,
       watchdogStageCapMs: 120 * 60_000,
@@ -97,5 +97,17 @@ describe("enrichJobPublicView", () => {
       { nowMs: started + Math.floor(budget * 0.85) },
     );
     assert.equal(raised.watchdogCapApproaching, false);
+  });
+
+  it("surfaces statusDetail for GitHub rate-limit waits (#223)", () => {
+    const msg = jobActivityMessage(
+      job({
+        statusDetail: {
+          reason: "waiting on GitHub rate limit",
+          until: "2026-11-16T22:40:00.000Z",
+        },
+      }),
+    );
+    assert.match(msg ?? "", /waiting on GitHub rate limit until/i);
   });
 });

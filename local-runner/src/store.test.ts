@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { RunnerConfig } from "./config.js";
+import { jobFile, jobsDir } from "./paths.js";
 import { createJob, listJobs, loadJob, saveJob } from "./store.js";
 import {
   clearStaleSettlingMarkers,
@@ -43,6 +44,32 @@ describe("job store", () => {
     );
     assert.equal(job.input.promptFile, "");
     assert.equal(job.dryRun, true);
+  });
+
+  it("fills a missing re-review model from the review model on load", async () => {
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), "lr-store-rereview-"));
+    const id = "job-old-rereview";
+    await mkdir(jobsDir(dataDir), { recursive: true });
+    await writeFile(
+      jobFile(dataDir, id),
+      JSON.stringify({
+        id,
+        model: "composer-2.5",
+        stageModels: { build: "b", review: "r", fix: "f" },
+        effectiveSnapshot: {
+          maxRounds: 3,
+          stageModels: { build: "b", review: "r", fix: "f" },
+          baseRef: null,
+          watchdogInactivityMs: 1,
+          watchdogStageCapMs: 1,
+          watchdogRecoveryAttempts: 0,
+        },
+      }),
+      "utf8",
+    );
+    const job = await loadJob(dataDir, id);
+    assert.equal(job?.stageModels?.rereview, "r");
+    assert.equal(job?.effectiveSnapshot?.stageModels.rereview, "r");
   });
 
   it("persists jobs across reload", async () => {
@@ -133,6 +160,25 @@ describe("job store", () => {
       createDefaults(dataDir2),
     );
     assert.equal(fromSlug.title, "dashboard script parse");
+  });
+
+  it("derives the title from a relative prompt file under repoPath", async () => {
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), "lr-store-title-"));
+    const repo = await mkdtemp(path.join(os.tmpdir(), "lr-store-title-repo-"));
+    await mkdir(path.join(repo, "prompts"), { recursive: true });
+    await writeFile(path.join(repo, "prompts/implement.md"), "# Ship from repo\n", "utf8");
+    const job = await createJob(
+      dataDir,
+      {
+        repoPath: repo,
+        branch: "feat/prompts",
+        promptFile: "prompts/implement.md",
+        dryRun: true,
+      },
+      createDefaults(dataDir),
+    );
+    assert.equal(job.title, "Ship from repo");
+    assert.equal(job.input.promptFile, "prompts/implement.md");
   });
 
   it("docs job uses setup default repo preset over code default", async () => {

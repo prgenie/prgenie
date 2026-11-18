@@ -78,6 +78,7 @@ function stageModelsFor(job: JobRecord): JobStageModels {
     job.effectiveSnapshot?.stageModels ?? {
       build: job.model,
       review: job.model,
+      rereview: job.model,
       fix: job.model,
     }
   );

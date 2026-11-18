@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -103,12 +103,16 @@ describe("RunnerEngine steer/stop", () => {
 });
 
 describe("RunnerEngine queue", () => {
-  const prompt = "/missing-prompt.md";
+  async function writePrompt(repo: string): Promise<string> {
+    const file = path.join(repo, "prompt.md");
+    await writeFile(file, "implement\n", "utf8");
+    return file;
+  }
 
   async function seedJob(dataDir: string, repo: string, branch: string, queued = false) {
     const job = await createJob(
       dataDir,
-      { repoPath: repo, branch, promptFile: prompt, maxRounds: 1, dryRun: true },
+      { repoPath: repo, branch, promptFile: await writePrompt(repo), maxRounds: 1, dryRun: true },
       { model: "composer-2.5", dryRun: true, config: testConfig(dataDir) },
     );
     if (queued) {
@@ -133,7 +137,12 @@ describe("RunnerEngine queue", () => {
     await saveSettings(dataDir, { maxActiveJobs: 1 });
     await seedJob(dataDir, repo, "feat/running");
     const engine = new RunnerEngine(testConfig(dataDir));
-    const args = { repoPath: repo, branch: "feat/x", promptFile: prompt, dryRun: true };
+    const args = {
+      repoPath: repo,
+      branch: "feat/x",
+      promptFile: await writePrompt(repo),
+      dryRun: true,
+    };
 
     const queued = await engine.startJob(args);
     assert.equal(queued.queueState?.queued, true);
@@ -147,7 +156,12 @@ describe("RunnerEngine queue", () => {
     await saveSettings(dataDir, { maxActiveJobs: 1 });
     await seedJob(dataDir, repo, "feat/running");
     const engine = new RunnerEngine(testConfig(dataDir));
-    const args = { repoPath: repo, branch: "feat/x", promptFile: prompt, dryRun: true };
+    const args = {
+      repoPath: repo,
+      branch: "feat/x",
+      promptFile: await writePrompt(repo),
+      dryRun: true,
+    };
 
     const results = await Promise.allSettled([1, 2, 3].map(() => engine.startJob(args)));
     assert.equal(results.filter((r) => r.status === "fulfilled").length, 1);
@@ -162,6 +176,7 @@ describe("RunnerEngine queue", () => {
     await initBareGitRepo(repo);
     await saveSettings(dataDir, { maxActiveJobs: 1 });
     const engine = new RunnerEngine(testConfig(dataDir), { watchCi: false });
+    const prompt = await writePrompt(repo);
     const jobArgs = (branch: string) => ({
       repoPath: repo,
       branch,

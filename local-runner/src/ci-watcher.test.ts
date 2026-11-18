@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import type { RunnerConfig } from "./config.js";
 import type { RunnerEngine } from "./engine.js";
-import { CiWatcher } from "./ci-watcher.js";
+import { CI_REST_FLOOR, CiWatcher } from "./ci-watcher.js";
 import { createJob, loadJob, saveJob } from "./store.js";
 
 function testConfig(dataDir: string): RunnerConfig {
@@ -88,5 +88,82 @@ describe("CiWatcher", () => {
     assert.equal(after?.stage, "reviewing");
     assert.equal(after?.prIsDraft, true);
     assert.equal(after?.error, "pr ready: nope");
+  });
+
+  it("skips non-urgent jobs when REST core quota is below the floor (#236)", async () => {
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), "lr-ciw-quota-"));
+    const config = testConfig(dataDir);
+    const mk = async (branch: string) => {
+      const j = await createJob(
+        dataDir,
+        { repoPath: "/tmp/repo", branch, promptFile: "/p", dryRun: true },
+        { model: "m", dryRun: true, config },
+      );
+      j.prUrl = "https://github.com/example/example/pull/1";
+      j.prNumber = 1;
+      return j;
+    };
+    const settled = await mk("feat/settled");
+    settled.stage = "approved";
+    settled.ciStatus = { status: "success", checkedAt: "", source: "github" };
+    await saveJob(dataDir, settled);
+    const closed = await mk("feat/closed");
+    closed.stage = "approved";
+    closed.ciStatus = { status: "closed", checkedAt: "", source: "github" };
+    await saveJob(dataDir, closed);
+    const active = await mk("feat/active");
+    active.stage = "reviewing";
+    await saveJob(dataDir, active);
+
+    const fetched: string[] = [];
+    let remaining = CI_REST_FLOOR - 1;
+    const watcher = new CiWatcher(config, fakeEngine, {
+      fetchPrCiStatus: async (_cwd, ref) => {
+        fetched.push(ref.branch ?? "");
+        return { status: "pending", summary: "p", source: "github" };
+      },
+      syncDraftReadyForJob: async (j) => ({ job: j, changed: false }),
+      cleanupWorktree: async () => {},
+      fetchCoreRemaining: async () => remaining,
+    });
+
+    await watcher.tick();
+    assert.deepEqual(fetched, ["feat/active"]);
+    assert.equal(watcher.lastTick?.skippedLowQuota, 1);
+    assert.equal(watcher.lastTick?.polled, 1);
+
+    fetched.length = 0;
+    remaining = 4000;
+    await watcher.tick();
+    assert.deepEqual(fetched.sort(), ["feat/active", "feat/settled"]);
+  });
+
+  it("cleanup from the watcher never makes its own merged-PR REST call (#236)", async () => {
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), "lr-ciw-cleanup-"));
+    const config = testConfig(dataDir);
+    const job = await createJob(
+      dataDir,
+      { repoPath: "/tmp/repo", branch: "feat/settled", promptFile: "/p", dryRun: true },
+      { model: "m", dryRun: true, config },
+    );
+    job.prUrl = "https://github.com/example/example/pull/1";
+    job.prNumber = 1;
+    job.stage = "approved";
+    job.worktreePath = "/tmp/wt-settled";
+    job.ciStatus = { status: "success", checkedAt: new Date().toISOString(), source: "github" };
+    await saveJob(dataDir, job);
+
+    const seen: Array<boolean | undefined> = [];
+    const watcher = new CiWatcher(config, fakeEngine, {
+      fetchPrCiStatus: async () => ({ status: "success", summary: "ok", source: "github" }),
+      syncDraftReadyForJob: async (j) => ({ job: j, changed: false }),
+      cleanupWorktree: async (_c, _j, _n, _l, opts) => {
+        seen.push(opts?.skipMergeSync);
+      },
+      fetchCoreRemaining: async () => 4000,
+    });
+    await watcher.tick(); // settled + recently checked: cleanup-only path
+    await watcher.refreshJobById(job.id); // refresh path
+    assert.deepEqual(seen, [true, true]);
   });
 });

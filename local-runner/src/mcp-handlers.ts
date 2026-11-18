@@ -29,10 +29,11 @@ export const RUNNER_MCP_TOOLS = [
         stageModels: {
           type: "object",
           description:
-            "Per-stage models; each wins over model, Setup defaults and PRGENIE_RUNNER_MODEL. Fix defaults to auto on cursor-agent.",
+            "Per-stage models; each wins over model, Setup defaults and PRGENIE_RUNNER_MODEL. rereview is review round 2+ and defaults to auto on cursor-agent (other drivers use the review model). Fix defaults to auto on cursor-agent.",
           properties: {
             build: { type: "string" },
             review: { type: "string" },
+            rereview: { type: "string" },
             fix: { type: "string" },
           },
         },

@@ -83,7 +83,7 @@ export function setupUiHtml(
     </label>
     <p class="meta field-error text-sm text-red-400" id="err-maxActiveJobs" hidden></p>
     <h3 class="mt-3 text-sm font-medium">Per-stage default models</h3>
-    <p class="meta">Leave blank to inherit. Fix defaults to <code>auto</code> on drivers that support it.</p>
+    <p class="meta">Leave blank to inherit. Re-review (round 2+) defaults to <code>auto</code> on drivers that support it and to the review model otherwise. Fix defaults to <code>auto</code> on drivers that support it.</p>
     <label class="block min-w-0">Build model
       <input id="stageModelBuild" class="min-w-0 max-w-full" placeholder="inherits default model" />
     </label>
@@ -92,6 +92,10 @@ export function setupUiHtml(
       <input id="stageModelReview" class="min-w-0 max-w-full" placeholder="inherits build / default" />
     </label>
     <p class="meta field-error text-sm text-red-400" id="err-stageModelReview" hidden></p>
+    <label class="block min-w-0">Re-review model
+      <input id="stageModelRereview" class="min-w-0 max-w-full" placeholder="auto" />
+    </label>
+    <p class="meta field-error text-sm text-red-400" id="err-stageModelRereview" hidden></p>
     <label class="block min-w-0">Fix model
       <input id="stageModelFix" class="min-w-0 max-w-full" placeholder="auto" />
     </label>
@@ -215,7 +219,7 @@ export function setupUiHtml(
         BOUNDS.maxActiveJobs.max,
       );
       if (ma) errors.maxActiveJobs = ma;
-      for (const key of ["build", "review", "fix"]) {
+      for (const key of ["build", "review", "rereview", "fix"]) {
         const id = "stageModel" + key.charAt(0).toUpperCase() + key.slice(1);
         const v = document.getElementById(id).value.trim();
         if (v && typeof v !== "string") errors[id] = "stageModels." + key + " must be a string";
@@ -286,9 +290,11 @@ export function setupUiHtml(
       const sm = loaded.stageModels || {};
       const buildStored = document.getElementById("stageModelBuild").value.trim();
       const reviewStored = document.getElementById("stageModelReview").value.trim();
+      const rereviewStored = document.getElementById("stageModelRereview").value.trim();
       const fixStored = document.getElementById("stageModelFix").value.trim();
       const build = buildStored || sm.build || defaultModel;
       const review = reviewStored || sm.review || sm.build || defaultModel;
+      const rereview = rereviewStored || sm.rereview || "auto";
       const fix =
         fixStored ||
         sm.fix ||
@@ -299,6 +305,8 @@ export function setupUiHtml(
         build +
         " · review " +
         review +
+        " · re-review " +
+        rereview +
         " · fix " +
         fix +
         (loaded.defaultModel ? "" : " (default model from env: " + envModel + ")");
@@ -358,6 +366,7 @@ export function setupUiHtml(
       const sm = loaded.stageModels || {};
       document.getElementById("stageModelBuild").value = stageInputValue(null, sm.build);
       document.getElementById("stageModelReview").value = stageInputValue(null, sm.review);
+      document.getElementById("stageModelRereview").value = stageInputValue(null, sm.rereview);
       document.getElementById("stageModelFix").value = stageInputValue(null, sm.fix);
       const w = loaded.watchdog || {};
       document.getElementById("watchdogInactivityMs").value = String(w.inactivityMs ?? "");
@@ -391,6 +400,7 @@ export function setupUiHtml(
       "defaultModel",
       "stageModelBuild",
       "stageModelReview",
+      "stageModelRereview",
       "stageModelFix",
     ]) {
       document.getElementById(id).addEventListener("input", () => updateEffectiveLabels());
@@ -485,6 +495,7 @@ export function setupUiHtml(
         stageModels: {
           build: stageVal("stageModelBuild"),
           review: stageVal("stageModelReview"),
+          rereview: stageVal("stageModelRereview"),
           fix: stageVal("stageModelFix"),
         },
         watchdog: {

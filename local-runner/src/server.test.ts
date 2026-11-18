@@ -527,6 +527,11 @@ describe("PATCH /api/settings validation", () => {
       "stageModels.build must be a string or null",
     ],
     [
+      "stageModels.rereview number",
+      { stageModels: { rereview: 1 } },
+      "stageModels.rereview must be a string or null",
+    ],
+    [
       "notifyEvents.onFailed string",
       { notifyEvents: { onFailed: "yes" } },
       "notifyEvents.onFailed must be a boolean",
@@ -587,7 +592,7 @@ describe("PATCH /api/settings validation", () => {
           defaultMaxRounds: 5,
           maxActiveJobs: 4,
           watchdog: { inactivityMs: 120_000, recoveryAttempts: 2 },
-          stageModels: { review: "review-model" },
+          stageModels: { review: "review-model", rereview: "auto" },
           notifyEvents: { onStuck: false },
           jobTypes: {
             compute: {
@@ -603,7 +608,7 @@ describe("PATCH /api/settings validation", () => {
         defaultMaxRounds: number;
         maxActiveJobs: number;
         watchdog: { inactivityMs: number; stageCapMs: number; recoveryAttempts: number };
-        stageModels: { review: string | null };
+        stageModels: { review: string | null; rereview: string | null };
         notifyEvents: { onStuck: boolean; onFailed: boolean };
         settingsRevision: number;
       };
@@ -615,6 +620,7 @@ describe("PATCH /api/settings validation", () => {
         recoveryAttempts: 2,
       });
       assert.equal(got.stageModels.review, "review-model");
+      assert.equal(got.stageModels.rereview, "auto");
       assert.equal(got.notifyEvents.onStuck, false);
       assert.equal(got.notifyEvents.onFailed, true);
       const computeWd = (
@@ -697,6 +703,11 @@ describe("start job validation parity (HTTP POST /api/jobs vs MCP start_job)", (
       "non-string stage model",
       { ...base, stageModels: { review: 1 } },
       "stageModels.review must be a string",
+    ],
+    [
+      "non-string rereview model",
+      { ...base, stageModels: { rereview: 2 } },
+      "stageModels.rereview must be a string",
     ],
     [
       "non-array ticketUrls",
@@ -793,21 +804,27 @@ describe("start job validation parity (HTTP POST /api/jobs vs MCP start_job)", (
       await seedJob(s.dataDir, "occupies-slot", "building");
       const repoPath = await mkdtemp(path.join(os.tmpdir(), "lr-parity-models-repo-"));
       await initBareGitRepo(repoPath);
+      const promptFile = path.join(repoPath, "prompt.md");
+      await writeFile(promptFile, "# prompt\n", "utf8");
       const requests: Array<[string, Record<string, unknown>, Record<string, string>]> = [
         [
           "explicit fix beats legacy model",
           { model: "composer-2.5", stageModels: { review: "review-x", fix: "auto" } },
-          { build: "composer-2.5", review: "review-x", fix: "auto" },
+          { build: "composer-2.5", review: "review-x", rereview: "composer-2.5", fix: "auto" },
         ],
-        ["no fix model given", {}, { build: "composer-2.5", review: "composer-2.5", fix: "auto" }],
+        [
+          "no fix model given",
+          {},
+          { build: "composer-2.5", review: "composer-2.5", rereview: "auto", fix: "auto" },
+        ],
         [
           "explicit non-auto fix",
           { stageModels: { fix: "fix-x" } },
-          { build: "composer-2.5", review: "composer-2.5", fix: "fix-x" },
+          { build: "composer-2.5", review: "composer-2.5", rereview: "auto", fix: "fix-x" },
         ],
       ];
       for (const [i, [label, extra, expected]] of requests.entries()) {
-        const payload = { ...base, repoPath, ...extra };
+        const payload = { ...base, repoPath, promptFile, ...extra };
         const res = await httpRequest(s.port, "POST", "/api/jobs", {
           token: TOKEN,
           body: JSON.stringify({ ...payload, branch: `feat/http-${i}` }),
@@ -1030,7 +1047,7 @@ describe("extend running job watchdog over HTTP and MCP (#216)", () => {
   function withSnapshot(record: JobRecord, snap: Partial<JobEffectiveSnapshot> = {}): JobRecord {
     record.effectiveSnapshot = {
       maxRounds: record.maxRounds,
-      stageModels: { build: "m", review: "m", fix: "m" },
+      stageModels: { build: "m", review: "m", rereview: "m", fix: "m" },
       baseRef: "main",
       watchdogInactivityMs: 15 * 60_000,
       watchdogStageCapMs: 7_200_000,
