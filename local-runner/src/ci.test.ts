@@ -2,10 +2,15 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildGhPrViewArgs,
+  CI_GIVE_UP_AFTER_MS,
+  CI_SETTLED_POLL_MS,
+  CI_STALE_AFTER_MS,
+  CI_STALE_POLL_MS,
   fetchPrCiStatus,
   firstStderrLine,
   GH_PR_VIEW_JSON,
   isCiFinal,
+  isCiPollUrgent,
   MERGED_HIDE_AFTER_MS,
   repoSlugFromPrUrl,
   resolveDisplayStatus,
@@ -14,7 +19,7 @@ import {
   shouldHideMergedJob,
   shouldPollCi,
 } from "./ci.js";
-import type { JobRecord } from "./types.js";
+import type { CiRollupStatus, JobRecord } from "./types.js";
 
 describe("rollupCheckStatuses", () => {
   it("maps pending when any check is in progress", () => {
@@ -161,6 +166,101 @@ describe("shouldPollCi", () => {
       }),
       true,
     );
+  });
+});
+
+describe("shouldPollCi REST budget (#236)", () => {
+  const now = Date.parse("2026-11-18T05:00:00.000Z");
+  const iso = (msAgo: number) => new Date(now - msAgo).toISOString();
+  const base: JobRecord = {
+    id: "j",
+    createdAt: iso(60_000),
+    updatedAt: iso(60_000),
+    input: { repoPath: "/r", branch: "b", promptFile: "/p" },
+    stage: "approved",
+    reviewRound: 0,
+    maxRounds: 2,
+    model: "m",
+    driverId: "cursor-agent",
+    worktreePath: "/wt",
+    repoSlug: "o/r",
+    prUrl: "https://github.com/o/r/pull/1",
+    prNumber: 1,
+    prIsDraft: null,
+    approveHeadSha: null,
+    readyPromotedAt: null,
+    linearIssue: null,
+    ticketUrl: null,
+    title: "b",
+    tokenUsage: null,
+    ciStatus: null,
+    lastVerdict: null,
+    error: null,
+    logPath: "/log",
+    steerQueue: [],
+    stopRequested: false,
+    dryRun: true,
+    archivedAt: null,
+  };
+  const ci = (status: CiRollupStatus, checkedMsAgo: number): JobRecord["ciStatus"] => ({
+    status,
+    checkedAt: iso(checkedMsAgo),
+    source: "github",
+  });
+
+  it("never polls a closed (unmerged) PR", () => {
+    for (const stage of [
+      "approved",
+      "changes_remaining",
+      "failed",
+      "stopped",
+      "reviewing",
+    ] as const) {
+      assert.equal(
+        shouldPollCi({ ...base, stage, ciStatus: ci("closed", 10 * 60 * 60_000) }, now),
+        false,
+      );
+    }
+  });
+
+  it("never polls archived jobs", () => {
+    assert.equal(
+      shouldPollCi({ ...base, archivedAt: iso(0), ciStatus: ci("pending", 0) }, now),
+      false,
+    );
+  });
+
+  it("polls merge-watch jobs every tick while CI is pending", () => {
+    assert.equal(shouldPollCi({ ...base, ciStatus: ci("pending", 30_000) }, now), true);
+  });
+
+  it("polls settled merge-watch jobs only every CI_SETTLED_POLL_MS", () => {
+    assert.equal(shouldPollCi({ ...base, ciStatus: ci("success", 60_000) }, now), false);
+    assert.equal(shouldPollCi({ ...base, ciStatus: ci("success", CI_SETTLED_POLL_MS) }, now), true);
+    assert.equal(
+      shouldPollCi({ ...base, stage: "failed", ciStatus: ci("failure", 5 * 60_000) }, now),
+      false,
+    );
+  });
+
+  it("polls stale settled jobs hourly and gives up after a week", () => {
+    const stale = { ...base, updatedAt: iso(CI_STALE_AFTER_MS + 60_000) };
+    assert.equal(
+      shouldPollCi({ ...stale, ciStatus: ci("success", CI_SETTLED_POLL_MS) }, now),
+      false,
+    );
+    assert.equal(shouldPollCi({ ...stale, ciStatus: ci("success", CI_STALE_POLL_MS) }, now), true);
+    const old = { ...base, updatedAt: iso(CI_GIVE_UP_AFTER_MS + 60_000) };
+    assert.equal(
+      shouldPollCi({ ...old, ciStatus: ci("success", CI_STALE_POLL_MS * 10) }, now),
+      false,
+    );
+  });
+
+  it("marks only pending CI and build stages as urgent", () => {
+    assert.equal(isCiPollUrgent({ ...base, ciStatus: ci("pending", 0) }), true);
+    assert.equal(isCiPollUrgent({ ...base, stage: "building" }), true);
+    assert.equal(isCiPollUrgent({ ...base, ciStatus: ci("success", 0) }), false);
   });
 });
 

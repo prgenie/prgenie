@@ -1,7 +1,8 @@
 import type { RunnerConfig } from "./config.js";
 import type { RunnerEngine } from "./engine.js";
 import type { JobRecord } from "./types.js";
-import { fetchPrCiStatus, shouldPollCi } from "./ci.js";
+import { fetchPrCiStatus, isCiPollUrgent, shouldPollCi } from "./ci.js";
+import { gh } from "./github.js";
 import {
   docChecksConfigFromSettings,
   fetchDocChecksStatus,
@@ -16,15 +17,45 @@ import { loadSettings } from "./settings.js";
 import { maybeCleanupJobWorktree } from "./worktree-cleanup.js";
 
 const CI_POLL_MS = 60_000;
+/** Below this many REST core calls left, only urgent jobs are polled (#236). */
+export const CI_REST_FLOOR = 500;
+
+/** Reads REST core remaining via /rate_limit (does not count against the quota). Null when unknown. */
+export async function fetchCoreRemaining(cwd: string | null): Promise<number | null> {
+  try {
+    const res = await gh(cwd ?? process.cwd(), [
+      "api",
+      "rate_limit",
+      "--jq",
+      ".resources.core.remaining",
+    ]);
+    if (res.code !== 0) return null;
+    const n = Number.parseInt(res.stdout.trim(), 10);
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+export type CiTickStats = {
+  at: string;
+  polled: number;
+  skippedLowQuota: number;
+  coreRemaining: number | null;
+};
 
 export type CiWatcherDeps = {
   fetchPrCiStatus?: typeof fetchPrCiStatus;
   syncDraftReadyForJob?: typeof syncDraftReadyForJob;
   cleanupWorktree?: typeof maybeCleanupJobWorktree;
+  fetchCoreRemaining?: (cwd: string | null) => Promise<number | null>;
+  now?: () => number;
 };
 
 export class CiWatcher {
   private timer: ReturnType<typeof setInterval> | null = null;
+  /** Last tick's poll counts, exposed on /api/jobs/meta. */
+  lastTick: CiTickStats | null = null;
 
   constructor(
     private readonly config: RunnerConfig,
@@ -101,16 +132,45 @@ export class CiWatcher {
     }
   }
 
-  private async tick(): Promise<void> {
+  async tick(): Promise<void> {
     const cleanup = this.deps.cleanupWorktree ?? maybeCleanupJobWorktree;
+    const readRemaining = this.deps.fetchCoreRemaining ?? fetchCoreRemaining;
     const jobs = await listJobs(this.config.dataDir);
-    const nowMs = Date.now();
+    const nowMs = this.deps.now?.() ?? Date.now();
+    const due: JobRecord[] = [];
     for (const job of jobs) {
-      if (shouldPollCi(job) || shouldPollDocChecks(job)) {
-        await this.refreshJob(job);
+      if (shouldPollCi(job, nowMs) || shouldPollDocChecks(job)) {
+        due.push(job);
       } else if (job.worktreePath) {
         await cleanup(this.config, job, nowMs, (msg) => console.warn(`[ci-watcher] ${msg}`));
       }
+    }
+
+    let coreRemaining: number | null = null;
+    if (due.some((j) => !isCiPollUrgent(j))) {
+      try {
+        coreRemaining = await readRemaining(resolveJobSpawnCwd(due[0]!));
+      } catch {
+        coreRemaining = null;
+      }
+    }
+    const lowQuota = coreRemaining != null && coreRemaining < CI_REST_FLOOR;
+
+    let polled = 0;
+    let skippedLowQuota = 0;
+    for (const job of due) {
+      if (lowQuota && !isCiPollUrgent(job)) {
+        skippedLowQuota++;
+        continue;
+      }
+      polled++;
+      await this.refreshJob(job);
+    }
+    this.lastTick = { at: new Date(nowMs).toISOString(), polled, skippedLowQuota, coreRemaining };
+    if (skippedLowQuota > 0) {
+      console.warn(
+        `[ci-watcher] REST core remaining ${coreRemaining} < ${CI_REST_FLOOR}; skipped ${skippedLowQuota} non-urgent job(s)`,
+      );
     }
   }
 }

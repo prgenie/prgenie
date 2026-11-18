@@ -1,5 +1,5 @@
 import type { RunnerConfig } from "./config.js";
-import { CiWatcher, type CiWatcherDeps } from "./ci-watcher.js";
+import { CiWatcher, type CiTickStats, type CiWatcherDeps } from "./ci-watcher.js";
 import { runJobLoop } from "./job-runner.js";
 import { enrichJobPublicView, type JobPublicView } from "./job-api-view.js";
 import { JobControl } from "./job-control.js";
@@ -365,8 +365,14 @@ export class RunnerEngine extends EventEmitter {
     return jobs.map((j) => enrichJobPublicView(j));
   }
 
-  async jobsMeta(): Promise<{ totalOnDisk: number; mergedHidden: number; archived: number }> {
-    return jobsDashboardMeta(this.config.dataDir);
+  async jobsMeta(): Promise<{
+    totalOnDisk: number;
+    mergedHidden: number;
+    archived: number;
+    ciTick: CiTickStats | null;
+  }> {
+    const meta = await jobsDashboardMeta(this.config.dataDir);
+    return { ...meta, ciTick: this.ciWatcher.lastTick };
   }
 
   /** Live job, else archived job (read-only transcript). */
