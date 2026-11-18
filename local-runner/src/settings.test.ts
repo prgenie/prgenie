@@ -32,6 +32,28 @@ describe("runner settings", () => {
     assert.equal(s.maxActiveJobs, 2);
     assert.equal(s.autoContinueOnBoot, true);
     assert.equal(s.stageModels.fix, "auto");
+    assert.equal(s.stageModels.rereview, "auto");
+  });
+
+  it("defaults a missing rereview to auto and keeps an explicit fix model", async () => {
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), "lr-set-rereview-"));
+    await writeFile(
+      runnerSettingsFile(dataDir),
+      JSON.stringify({
+        version: 2,
+        configured: true,
+        stageModels: { build: "composer-2.5", review: "composer-2.5", fix: "composer-2.5" },
+      }),
+      "utf8",
+    );
+    const s = await loadSettings(dataDir);
+    assert.equal(s.stageModels.build, "composer-2.5");
+    assert.equal(s.stageModels.review, "composer-2.5");
+    assert.equal(s.stageModels.fix, "composer-2.5");
+    assert.equal(s.stageModels.rereview, "auto");
+    const saved = await saveSettings(dataDir, { stageModels: { rereview: "composer-2.5" } });
+    assert.equal(saved.stageModels.rereview, "composer-2.5");
+    assert.equal(saved.stageModels.fix, "composer-2.5");
   });
 
   it("migrates legacy notify-settings.json", async () => {

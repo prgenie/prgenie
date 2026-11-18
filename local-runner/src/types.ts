@@ -21,7 +21,7 @@ export type JobWorkerState = {
 
 export type JobProfile = "code" | "docs" | "compute";
 
-export type JobStageModelKey = "build" | "review" | "fix";
+export type JobStageModelKey = "build" | "review" | "rereview" | "fix";
 
 export type JobStageModels = Record<JobStageModelKey, string>;
 
@@ -132,6 +132,14 @@ export type JobRuntimeState = {
   };
 };
 
+/** Runner-owned wait hint (GitHub rate limit, post-build push, etc.). */
+export type JobStatusDetail = {
+  reason: string;
+  /** ISO-8601 time when the wait is expected to end (best effort). */
+  until?: string;
+  phase?: string;
+};
+
 export type JobQueueState = {
   queued: boolean;
   position?: number;
@@ -170,11 +178,16 @@ export interface JobRecord {
   model: string;
   /** Resolved per-stage models snapshot at job creation. */
   stageModels?: JobStageModels;
-  /** Driver-reported or observed model id per stage (when known). */
+  /**
+   * Driver-reported or observed model id per stage (when known).
+   * Review round 1 is `review`; review round 2+ is `rereview`.
+   */
   stageModelActual?: Partial<JobStageModels>;
   effectiveSnapshot?: JobEffectiveSnapshot;
   watchdog?: WatchdogState;
   runtime?: JobRuntimeState | null;
+  /** Visible wait state for dashboard/API while the worker is blocked on GitHub or post-build I/O. */
+  statusDetail?: JobStatusDetail | null;
   queueState?: JobQueueState;
   driverId: string;
   worktreePath: string | null;

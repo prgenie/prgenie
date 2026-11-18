@@ -4,7 +4,7 @@ import path from "node:path";
 import { loadConfig, runnerTokenFile } from "./config.js";
 import { RunnerEngine } from "./engine.js";
 import { handleMcpJsonRpc } from "./mcp-handlers.js";
-import { runnerListenUrls } from "./listen-urls.js";
+import { formatRunnerBindTarget, runnerListenUrls } from "./listen-urls.js";
 import { bindRunnerHttpServer } from "./http-bind.js";
 import { startHttpServer } from "./server.js";
 import { listJobs } from "./store.js";
@@ -47,7 +47,7 @@ async function cmdServe(): Promise<void> {
   // eslint-disable-next-line no-console
   console.log(
     [
-      `PR Genie runner listening on ${config.host}:${config.port} — UI ${urls.join(", ")} (MCP POST /mcp)`,
+      `PR Genie runner listening on ${formatRunnerBindTarget(config.host, config.port)} — UI ${urls.join(", ")} (MCP POST /mcp)`,
       `Bearer token file: ${tokenPath} (paste in dashboard; never log the token itself).`,
     ].join("\n"),
   );
@@ -155,14 +155,13 @@ function resolveRunnerEntryForRestart(): string {
 
 async function cmdRunnerRestart(): Promise<void> {
   const config = await loadConfig(process.env, { command: "restart" });
-  const host = config.host === "0.0.0.0" ? "127.0.0.1" : config.host;
   const entry = resolveRunnerEntryForRestart();
   const launcher = process.env.PRGENIE_RUNNER_RESTART_LAUNCHER?.trim() || process.execPath;
   process.exitCode = await runRunnerRestartCli(
     {
       build: process.argv.includes("--build"),
       entry,
-      host,
+      host: config.host,
       port: config.port,
       token: config.token,
     },

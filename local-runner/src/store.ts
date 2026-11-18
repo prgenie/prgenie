@@ -175,7 +175,21 @@ async function readJobFile(
       job.title = job.input?.branch?.trim() || job.id.slice(0, 8);
     }
     if (!job.stageModels && job.model) {
-      job.stageModels = { build: job.model, review: job.model, fix: job.model };
+      job.stageModels = {
+        build: job.model,
+        review: job.model,
+        rereview: job.model,
+        fix: job.model,
+      };
+    } else if (job.stageModels && !job.stageModels.rereview && job.stageModels.review) {
+      job.stageModels.rereview = job.stageModels.review;
+    }
+    if (
+      job.effectiveSnapshot?.stageModels &&
+      !job.effectiveSnapshot.stageModels.rereview &&
+      job.effectiveSnapshot.stageModels.review
+    ) {
+      job.effectiveSnapshot.stageModels.rereview = job.effectiveSnapshot.stageModels.review;
     }
     return job;
   } catch {
@@ -366,6 +380,7 @@ export async function createJob(
       linearIssue: ticket.linearIssue,
       branch: args.branch,
       promptFile: promptFile || args.promptFile || "",
+      repoPath: target.repoPath,
     })) ||
     args.branch.trim() ||
     id.slice(0, 8);
@@ -419,6 +434,7 @@ export async function createJob(
     stageModels: {
       build: stageResolved.build,
       review: stageResolved.review,
+      rereview: stageResolved.rereview,
       fix: stageResolved.fix,
     },
     effectiveSnapshot: (() => {
@@ -428,6 +444,7 @@ export async function createJob(
         stageModels: {
           build: stageResolved.build,
           review: stageResolved.review,
+          rereview: stageResolved.rereview,
           fix: stageResolved.fix,
         },
         baseRef: settings.defaultBaseBranch,

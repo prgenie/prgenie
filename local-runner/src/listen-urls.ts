@@ -37,3 +37,21 @@ export function urlHostForRequest(configHost: string): string {
   const h = configHost.trim() || DEFAULT_HOST;
   return h === "0.0.0.0" || h === "::" ? "127.0.0.1" : h;
 }
+
+/**
+ * Host the server binds, for start/restart logs.
+ * All-interface binds keep that address and note the dashboard is on the LAN
+ * (the bearer token is still required). `lanIpv4` overrides best-effort detection.
+ */
+export function formatRunnerBindTarget(
+  host: string,
+  port: number,
+  lanIpv4?: string | null,
+): string {
+  const bindHost = host.trim() || DEFAULT_HOST;
+  const endpoint = bindHost === "::" ? `[::]:${port}` : `${bindHost}:${port}`;
+  if (bindHost !== "0.0.0.0" && bindHost !== "::") return endpoint;
+  const lan = lanIpv4 === undefined ? bestEffortLanIpv4() : lanIpv4;
+  const ui = lan ? `http://${lan}:${port}/` : `http://<lan-ip>:${port}/`;
+  return `${endpoint} (reachable on your network; UI ${ui})`;
+}

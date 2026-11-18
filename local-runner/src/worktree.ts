@@ -1,10 +1,11 @@
-import { mkdir, rm, access } from "node:fs/promises";
+import { appendFile, mkdir, rm, access } from "node:fs/promises";
 import path from "node:path";
-import { cursorWorktreeDir, repoSlugFromPath } from "./paths.js";
+import { cursorWorktreeDir, managedWorktreesRoot, repoSlugFromPath } from "./paths.js";
 import { git, type GhResult } from "./github.js";
 import { baseRefProbeOrder, resolveWorktreeBaseRef, type GitFn } from "./repo-base.js";
 import type { RunnerSettings } from "./settings.js";
-import { listJobs } from "./store.js";
+import { listJobs, patchJob } from "./store.js";
+import type { JobRecord } from "./types.js";
 
 export type WorktreeEnsureResult = {
   path: string;
@@ -100,6 +101,142 @@ async function enrichWorktreeAddFailure(
   return `git worktree add failed: branch "${branch}" is already checked out at ${wtPath} — ${hint}`;
 }
 
+/** Finished jobs whose worktree may be released so a follow-up can check out the same branch (#219). */
+const RELEASABLE_TERMINAL_STAGES = new Set(["approved", "stopped", "failed", "stuck"]);
+
+function pathIsStrictlyInside(parent: string, child: string): boolean {
+  const rel = path.relative(parent, child);
+  return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
+}
+
+/** Same boundary as worktree cleanup: never remove the repo checkout or a path outside the managed root. */
+function worktreeRemovalBlocked(holderPath: string, repoPath: string): boolean {
+  const holder = path.resolve(holderPath);
+  const repo = path.resolve(repoPath);
+  if (holder === repo || pathIsStrictlyInside(holder, repo)) return true;
+  return !pathIsStrictlyInside(path.resolve(managedWorktreesRoot()), holder);
+}
+
+function heldWorktreeError(
+  branch: string,
+  holderPath: string,
+  job: { id: string; stage: string },
+  detail: string,
+  next: string,
+): string {
+  return `branch "${branch}" is already checked out at ${holderPath} by ${job.stage} job ${job.id} (${detail}). ${next}`;
+}
+
+function jobHoldsWorktree(
+  job: JobRecord,
+  holderPath: string,
+  branch: string,
+  repoPath: string,
+): boolean {
+  return Boolean(
+    job.worktreePath?.trim() &&
+    worktreePathsEqual(job.worktreePath, holderPath) &&
+    job.input.branch.trim() === branch.trim() &&
+    job.input.repoPath?.trim() &&
+    worktreePathsEqual(job.input.repoPath, repoPath),
+  );
+}
+
+/**
+ * A terminal job keeps its worktree, and git will not check that branch out again.
+ * Release it when it is clean and HEAD matches origin/<branch>; otherwise refuse.
+ */
+async function releaseCleanPushedTerminalWorktree(
+  repoPath: string,
+  branch: string,
+  ownPath: string,
+  jobId: string,
+  opts?: WorktreeOpts,
+): Promise<void> {
+  if (!opts?.dataDir) return;
+  const gitImpl = opts.gitImpl ?? git;
+  const listed = await gitImpl(repoPath, ["worktree", "list", "--porcelain"]);
+  if (listed.code !== 0) return;
+  const holderPath = parseWorktreePathForBranch(listed.stdout, branch);
+  if (!holderPath || worktreePathsEqual(holderPath, ownPath)) return;
+
+  const heldErr = `fatal: '${branch}' is already used by worktree at '${holderPath}'`;
+  const refuse = () => enrichWorktreeAddFailure(repoPath, branch, heldErr, opts.dataDir);
+  if (worktreeRemovalBlocked(holderPath, repoPath)) {
+    throw new Error(await refuse());
+  }
+
+  const owner = (await listJobs(opts.dataDir)).find((job) =>
+    jobHoldsWorktree(job, holderPath, branch, repoPath),
+  );
+  if (
+    !owner ||
+    owner.id === jobId ||
+    owner.archivedAt ||
+    owner.worker ||
+    !RELEASABLE_TERMINAL_STAGES.has(owner.stage)
+  ) {
+    throw new Error(await refuse());
+  }
+
+  const keep = "Commit, push, or remove that worktree before starting another job on this branch.";
+  const status = await gitImpl(holderPath, ["status", "--porcelain"]);
+  if (status.code !== 0 || status.stdout.trim().length > 0) {
+    const detail =
+      status.code !== 0
+        ? status.stderr.trim() || status.stdout.trim() || "could not read worktree status"
+        : "uncommitted changes";
+    throw new Error(heldWorktreeError(branch, holderPath, owner, detail, keep));
+  }
+
+  const fetched = await gitImpl(repoPath, ["fetch", "origin", branch]);
+  if (fetched.code !== 0) {
+    const detail = (fetched.stderr || fetched.stdout).trim().slice(0, 180) || "git fetch failed";
+    throw new Error(
+      heldWorktreeError(
+        branch,
+        holderPath,
+        owner,
+        `could not verify origin/${branch}: ${detail}`,
+        keep,
+      ),
+    );
+  }
+
+  const head = await gitImpl(holderPath, ["rev-parse", "HEAD"]);
+  const remote = await gitImpl(repoPath, ["rev-parse", "--verify", `origin/${branch}`]);
+  const headSha = head.code === 0 ? head.stdout.trim() : "";
+  const remoteSha = remote.code === 0 ? remote.stdout.trim() : "";
+  if (!headSha || !remoteSha || headSha !== remoteSha) {
+    let detail = !remoteSha
+      ? `origin/${branch} does not exist`
+      : !headSha
+        ? head.stderr.trim() || "could not read HEAD"
+        : `HEAD does not match origin/${branch}`;
+    if (headSha && remoteSha && headSha !== remoteSha) {
+      const ahead = await gitImpl(holderPath, ["merge-base", "--is-ancestor", remoteSha, headSha]);
+      if (ahead.code === 0) detail = `HEAD is ahead of origin/${branch}`;
+    }
+    throw new Error(heldWorktreeError(branch, holderPath, owner, detail, keep));
+  }
+
+  const removed = await gitImpl(repoPath, ["worktree", "remove", holderPath]);
+  if (removed.code !== 0) {
+    const detail = removed.stderr.trim() || removed.stdout.trim() || "git worktree remove failed";
+    throw new Error(heldWorktreeError(branch, holderPath, owner, detail, keep));
+  }
+  await patchJob(opts.dataDir, owner.id, (fresh) => {
+    fresh.worktreePath = null;
+  });
+  if (owner.logPath.trim()) {
+    await appendFile(
+      owner.logPath,
+      `[worktree] released ${holderPath} (clean, matches origin/${branch}) for job ${jobId}\n`,
+      "utf8",
+    ).catch(() => undefined);
+  }
+}
+
 async function resolveBaseTip(
   repoPath: string,
   base: string,
@@ -178,6 +315,7 @@ export async function ensureWorktree(
   }
 
   await bestEffortFetchOrigin(repoPath, gitImpl);
+  await releaseCleanPushedTerminalWorktree(repoPath, branch, wt, jobId, opts);
 
   const remoteRef = `origin/${branch}`;
   const remoteProbe = await gitImpl(repoPath, ["rev-parse", "--verify", remoteRef]);

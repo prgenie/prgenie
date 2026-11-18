@@ -68,12 +68,19 @@ export async function fetchRateLimitResets(
   }
 }
 
+export type GithubRetryBackoffInfo = {
+  attempt: number;
+  delayMs: number;
+  resetAtEpochSec?: number | null;
+};
+
 export type GithubRetryOptions = {
   maxWaitMs?: number;
   sleep?: SleepFn;
   gh?: GhFn;
   lookupReset?: RateLimitResetLookup;
   /** When true, successful results still retry if rate-limited message appears in stdout (rare). */
+  onBackoff?: (info: GithubRetryBackoffInfo) => void | Promise<void>;
 };
 
 const defaultSleep: SleepFn = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -105,7 +112,9 @@ export async function ghWithGithubRetry(
     const delay = backoffDelayMs(attempt, resetAt);
     const remaining = maxWaitMs - (Date.now() - started);
     if (remaining <= 0) break;
-    await sleep(Math.min(delay, remaining));
+    const sleepMs = Math.min(delay, remaining);
+    await options.onBackoff?.({ attempt, delayMs: sleepMs, resetAtEpochSec: resetAt });
+    await sleep(sleepMs);
     attempt += 1;
   }
 

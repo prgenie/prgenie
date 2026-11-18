@@ -37,7 +37,10 @@ describe("setup UI html (#145)", () => {
     assert.match(html, /id="autoContinueOnBoot"/);
     assert.match(html, /id="stageModelBuild"/);
     assert.match(html, /id="stageModelReview"/);
+    assert.match(html, /id="stageModelRereview"/);
     assert.match(html, /id="stageModelFix"/);
+    assert.match(html, /rereview: stageVal\("stageModelRereview"\)/);
+    assert.match(html, /re-review/);
     assert.match(html, /id="watchdogInactivityMs"/);
     assert.match(html, /id="computeWatchdogInactivityMs"/);
     assert.match(html, /stageModelsEffective/);

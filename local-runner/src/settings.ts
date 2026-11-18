@@ -6,6 +6,7 @@ import { notifySettingsFile, runnerSettingsFile } from "./paths.js";
 import {
   BUILTIN_DEFAULT_MAX_ROUNDS,
   BUILTIN_FIX_MODEL,
+  BUILTIN_REREVIEW_MODEL,
   DEFAULT_WATCHDOG,
   MAX_ACTIVE_JOBS_DEFAULT,
   MAX_ACTIVE_JOBS_MAX,
@@ -39,6 +40,8 @@ export type DriverEntry = {
 export type StageModelDefaults = {
   build: string | null;
   review: string | null;
+  /** Review round 2+. `auto` on drivers that support it; otherwise the review model. */
+  rereview: string | null;
   fix: string | null;
 };
 
@@ -138,6 +141,7 @@ const DEFAULT_NOTIFY_EVENTS: NotifyEventSettings = {
 const DEFAULT_STAGE_MODELS: StageModelDefaults = {
   build: null,
   review: null,
+  rereview: BUILTIN_REREVIEW_MODEL,
   fix: BUILTIN_FIX_MODEL,
 };
 
@@ -209,10 +213,11 @@ function mergeDrivers(existing: DriverEntry[], patch: DriverEntry[] | undefined)
   return [...byId.values()];
 }
 
-/** Unset build/review stay null so they keep inheriting `defaultModel` (the Setup UI control). */
+/** Unset build/review stay null so they keep inheriting `defaultModel`. Omitted fix and rereview default to `auto`. */
 function parseStageModels(raw: Partial<RunnerSettings>): StageModelDefaults {
   const stage = normalizeStageModels(raw.stageModels);
   if (raw.stageModels?.fix === undefined) stage.fix = DEFAULT_STAGE_MODELS.fix;
+  if (raw.stageModels?.rereview === undefined) stage.rereview = DEFAULT_STAGE_MODELS.rereview;
   return stage;
 }
 
@@ -362,6 +367,7 @@ function mergeStageModels(
   return normalizeStageModels({
     build: patch.build !== undefined ? patch.build : current.build,
     review: patch.review !== undefined ? patch.review : current.review,
+    rereview: patch.rereview !== undefined ? patch.rereview : current.rereview,
     fix: patch.fix !== undefined ? patch.fix : current.fix,
   });
 }

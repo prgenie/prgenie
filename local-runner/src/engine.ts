@@ -1,5 +1,5 @@
 import type { RunnerConfig } from "./config.js";
-import { CiWatcher, type CiWatcherDeps } from "./ci-watcher.js";
+import { CiWatcher, type CiTickStats, type CiWatcherDeps } from "./ci-watcher.js";
 import { runJobLoop } from "./job-runner.js";
 import { enrichJobPublicView, type JobPublicView } from "./job-api-view.js";
 import { JobControl } from "./job-control.js";
@@ -57,6 +57,7 @@ import {
 import { liveWorkerLock, readWorkerLock } from "./job-worker-lock.js";
 import { inspectRestartState } from "./runner-restart.js";
 import { stat } from "node:fs/promises";
+import { assertSubmitPromptFiles } from "./prompt-file.js";
 
 const ACTIVE_STAGES = new Set(["building", "reviewing", "fixing"]);
 
@@ -201,6 +202,14 @@ export class RunnerEngine extends EventEmitter {
     if (preflight.blocking.length) {
       throw new ValidationError(formatJobPreflightErrors(preflight.blocking));
     }
+    await assertSubmitPromptFiles({
+      repoPath: target.repoPath,
+      branch: args.branch,
+      settings,
+      promptFile: args.promptFile,
+      reviewPromptFile: args.reviewPromptFile,
+      fixPromptFile: args.fixPromptFile,
+    });
     const preflightWarnings = preflight.warnings.map(formatJobPreflightMessage);
     const job = await createJob(this.config.dataDir, args, {
       model: this.config.defaultModel,
@@ -393,8 +402,14 @@ export class RunnerEngine extends EventEmitter {
     return jobs.map((j) => enrichJobPublicView(j));
   }
 
-  async jobsMeta(): Promise<{ totalOnDisk: number; mergedHidden: number; archived: number }> {
-    return jobsDashboardMeta(this.config.dataDir);
+  async jobsMeta(): Promise<{
+    totalOnDisk: number;
+    mergedHidden: number;
+    archived: number;
+    ciTick: CiTickStats | null;
+  }> {
+    const meta = await jobsDashboardMeta(this.config.dataDir);
+    return { ...meta, ciTick: this.ciWatcher.lastTick };
   }
 
   /** Live job, else archived job (read-only transcript). */

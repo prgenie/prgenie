@@ -67,38 +67,58 @@ function isGitHubValidation422(res: GhResult): boolean {
   return /\b422\b/.test(ghApiCombinedOutput(res));
 }
 
+async function restListOpenPrsForHead(
+  cwd: string,
+  branch: string,
+  repoSlug: string | null | undefined,
+  gh: RestGh,
+  retry: boolean,
+): Promise<{ pr: PrInfo | null; res: GhResult }> {
+  const prefix = repoApiPrefix(resolveRepoSlug(repoSlug, null));
+  const head = resolveRepoSlug(repoSlug, null)?.includes("/")
+    ? headRefForBranch(resolveRepoSlug(repoSlug, null), branch)
+    : await resolveHeadQualifier(cwd, branch, repoSlug, gh);
+  const args = [
+    "api",
+    "-X",
+    "GET",
+    `${prefix}/pulls`,
+    "-f",
+    `head=${head}`,
+    "-f",
+    "state=open",
+    "-f",
+    "per_page=5",
+  ];
+  const res = retry ? await ghWithGithubRetry(cwd, args, gh) : await gh(cwd, args);
+  if (res.code !== 0 || !res.stdout.trim()) return { pr: null, res };
+  try {
+    const rows = JSON.parse(res.stdout) as RestPull[];
+    if (!Array.isArray(rows) || rows.length === 0) return { pr: null, res };
+    return { pr: parsePullInfo(rows[0]), res };
+  } catch {
+    return { pr: null, res };
+  }
+}
+
 export async function restFindOpenPrForBranch(
   cwd: string,
   branch: string,
   repoSlug: string | null | undefined,
   gh: RestGh,
 ): Promise<PrInfo | null> {
-  const prefix = repoApiPrefix(resolveRepoSlug(repoSlug, null));
-  const head = await resolveHeadQualifier(cwd, branch, repoSlug, gh);
-  const res = await ghWithGithubRetry(
-    cwd,
-    [
-      "api",
-      "-X",
-      "GET",
-      `${prefix}/pulls`,
-      "-f",
-      `head=${head}`,
-      "-f",
-      "state=open",
-      "-f",
-      "per_page=5",
-    ],
-    gh,
-  );
-  if (res.code !== 0 || !res.stdout.trim()) return null;
-  try {
-    const rows = JSON.parse(res.stdout) as RestPull[];
-    if (!Array.isArray(rows) || rows.length === 0) return null;
-    return parsePullInfo(rows[0]);
-  } catch {
-    return null;
-  }
+  const { pr } = await restListOpenPrsForHead(cwd, branch, repoSlug, gh, true);
+  return pr;
+}
+
+/** Single REST attempt — for continue paths that must not hold the HTTP response on backoff. */
+export async function restFindOpenPrForBranchOnce(
+  cwd: string,
+  branch: string,
+  repoSlug: string | null | undefined,
+  gh: RestGh,
+): Promise<{ pr: PrInfo | null; res: GhResult }> {
+  return restListOpenPrsForHead(cwd, branch, repoSlug, gh, false);
 }
 
 export async function restGetPull(

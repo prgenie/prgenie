@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -234,12 +234,14 @@ describe("stage watchdog", () => {
     const repo = await mkdtemp(path.join(os.tmpdir(), "lr-wd-repo-"));
     const config = testConfig(dataDir);
     await saveSettings(dataDir, { watchdog: { inactivityMs: 60_000, recoveryAttempts: 1 } });
+    const promptFile = path.join(repo, "prompt.md");
+    await writeFile(promptFile, "implement\n", "utf8");
     const job = await createJob(
       dataDir,
       {
         repoPath: repo,
         branch: "feat/wd",
-        promptFile: path.join(repo, "missing-prompt.md"),
+        promptFile,
         maxRounds: 1,
         dryRun: true,
       },

@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -123,6 +123,36 @@ describe("resolveJobTitle", () => {
       promptFile: prompt,
     });
     assert.equal(t, "Ship feature");
+  });
+
+  it("reads a relative prompt against repoPath and leaves an absolute path as given", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "lr-title-rel-"));
+    const repo = path.join(root, "repo");
+    await mkdir(path.join(repo, "prompts"), { recursive: true });
+    await writeFile(path.join(repo, "prompts/p.md"), "# From repo\n", "utf8");
+    await writeFile(path.join(root, "outside.md"), "# Outside\n", "utf8");
+    await writeFile(path.join(repo, "outside.md"), "# Inside repo\n", "utf8");
+
+    const fromRepo = await resolveJobTitle({
+      branch: "feat/x",
+      promptFile: "prompts/p.md",
+      repoPath: repo,
+    });
+    assert.equal(fromRepo, "From repo");
+
+    const absolute = await resolveJobTitle({
+      branch: "feat/x",
+      promptFile: path.join(root, "outside.md"),
+      repoPath: repo,
+    });
+    assert.equal(absolute, "Outside");
+
+    const missing = await resolveJobTitle({
+      branch: "feat/x",
+      promptFile: "prompts/missing.md",
+      repoPath: repo,
+    });
+    assert.equal(missing, "feat/x");
   });
 
   it("falls back to branch", async () => {
