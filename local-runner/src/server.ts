@@ -66,6 +66,7 @@ const CONTINUE_ERROR_STATUS: Record<ContinueJobError["code"], number> = {
   running: 409,
   not_terminal: 409,
   branch_conflict: 409,
+  rate_limited: 429,
 };
 
 /** Validation is 400, a settings or branch conflict is 409, anything else is a server fault. */
@@ -86,9 +87,17 @@ export async function handleContinueJobRequest(
     return { status: 200, body };
   } catch (err) {
     const stage = err instanceof ContinueJobError && err.stage ? { stage: err.stage } : {};
+    const rate =
+      err instanceof ContinueJobError && err.code === "rate_limited" && err.resetAtEpochSec
+        ? {
+            rateLimited: true,
+            resetAtEpochSec: err.resetAtEpochSec,
+            resetAt: new Date(err.resetAtEpochSec * 1000).toISOString(),
+          }
+        : {};
     return {
       status: errorStatus(err),
-      body: { error: safeHandlerMessage(err), ...stage },
+      body: { error: safeHandlerMessage(err), ...stage, ...rate },
     };
   }
 }

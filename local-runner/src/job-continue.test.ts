@@ -166,9 +166,9 @@ describe("prepareJobContinue", () => {
       {
         isRunning: () => false,
         ensureWorktree: async () => ({ path: "/wt/adopt", reused: true }),
-        findPrForBranch: async () => ({
-          url: "https://github.com/o/r/pull/357",
-          number: 357,
+        findOpenPrOnce: async () => ({
+          pr: { url: "https://github.com/o/r/pull/357", number: 357 },
+          res: { code: 0, stdout: "[]", stderr: "" },
         }),
       },
     );
@@ -313,6 +313,65 @@ describe("prepareJobContinue", () => {
       },
     );
     assert.equal(result.worktree, "recreated");
+  });
+
+  it("skips PR adoption lookup when the job never had a worktree (#223)", async () => {
+    const job = await seedTerminal(dataDir, "job-no-wt", "failed", {
+      prUrl: null,
+      prNumber: null,
+      worktreePath: null,
+      dryRun: false,
+      error: "git worktree add failed",
+    });
+    let lookupCalls = 0;
+    const result = await prepareJobContinue(
+      cfg(dataDir),
+      { id: job.id },
+      {
+        isRunning: () => false,
+        findOpenPrOnce: async () => {
+          lookupCalls += 1;
+          return { pr: null, res: { code: 0, stdout: "[]", stderr: "" } };
+        },
+        ensureWorktree: async () => ({
+          path: "/wt/recreated",
+          reused: false,
+        }),
+      },
+    );
+    assert.equal(lookupCalls, 0, "should not call GitHub before worktree exists");
+    assert.equal(result.job.stage, "building");
+    assert.equal(result.job.worktreePath, "/wt/recreated");
+  });
+
+  it("fails fast with rate_limited when adopt lookup hits REST quota (#223)", async () => {
+    const job = await seedTerminal(dataDir, "job-rl", "failed", {
+      prUrl: null,
+      prNumber: null,
+      worktreePath: "/wt/rl",
+      dryRun: false,
+      reviewRound: 1,
+      maxRounds: 2,
+    });
+    await assert.rejects(
+      () =>
+        prepareJobContinue(
+          cfg(dataDir),
+          { id: job.id },
+          {
+            isRunning: () => false,
+            findOpenPrOnce: async () => ({
+              pr: null,
+              res: { code: 1, stdout: "", stderr: "API rate limit exceeded" },
+            }),
+          },
+        ),
+      (err: unknown) => {
+        assert.ok(err instanceof ContinueJobError);
+        assert.equal((err as ContinueJobError).code, "rate_limited");
+        return true;
+      },
+    );
   });
 
   it("persists continue history and maxRounds on disk", async () => {

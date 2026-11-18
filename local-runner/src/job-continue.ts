@@ -16,10 +16,13 @@ import {
   detectGitOperationInProgress,
   ensureContinueWorktree,
 } from "./worktree.js";
-import { findPrForBranch, git as defaultGit } from "./github.js";
+import { ghRaw, git as defaultGit } from "./github.js";
 import type { PrInfo } from "./github.js";
+import { fetchRateLimitResets, isGithubRateLimitResult } from "./github-rate-limit.js";
+import { restFindOpenPrForBranchOnce } from "./github-rest.js";
 import { shouldResumePostBuildPr } from "./job-pr-policy.js";
 import { assertContinueMaxRounds, normalizeContinueJobArgs } from "./settings-validation.js";
+import type { GhResult } from "./spawn-cmd.js";
 import type { ContinueJobArgs } from "./types.js";
 
 export const CONTINUE_TERMINAL_STAGES = new Set([
@@ -32,13 +35,21 @@ export const CONTINUE_TERMINAL_STAGES = new Set([
 ]);
 
 export type ContinueJobErrorCode =
-  "invalid_id" | "not_found" | "archived" | "running" | "not_terminal" | "branch_conflict";
+  | "invalid_id"
+  | "not_found"
+  | "archived"
+  | "running"
+  | "not_terminal"
+  | "branch_conflict"
+  | "rate_limited";
 
 export class ContinueJobError extends Error {
   constructor(
     message: string,
     readonly code: ContinueJobErrorCode,
     readonly stage?: string,
+    /** GitHub REST core/graphql reset epoch (seconds) when code is rate_limited. */
+    readonly resetAtEpochSec?: number,
   ) {
     super(message);
     this.name = "ContinueJobError";
@@ -56,22 +67,40 @@ export type ContinueJobDeps = {
   ensureWorktree?: typeof ensureContinueWorktree;
   readPromptFile?: (filePath: string) => Promise<string>;
   gitImpl?: typeof defaultGit;
-  findPrForBranch?: (
+  findOpenPrOnce?: (
     cwd: string,
     branch: string,
     repoSlug?: string | null,
-  ) => Promise<PrInfo | null>;
+  ) => Promise<{ pr: PrInfo | null; res: GhResult }>;
 };
+
+function jobHadWorktree(job: JobRecord): boolean {
+  return Boolean(job.worktreePath?.trim());
+}
 
 async function adoptOpenPrForBranchIfNeeded(
   job: JobRecord,
   deps: ContinueJobDeps,
 ): Promise<boolean> {
   if (job.prUrl?.trim() || job.dryRun) return false;
-  const cwd = job.worktreePath?.trim() || job.input.repoPath?.trim();
-  if (!cwd) return false;
-  const findPr = deps.findPrForBranch ?? findPrForBranch;
-  const existing = await findPr(cwd, job.input.branch, job.repoSlug);
+  if (!jobHadWorktree(job)) return false;
+  if (shouldResumePostBuildPr(job)) return false;
+  const cwd = job.worktreePath!.trim();
+  const lookup =
+    deps.findOpenPrOnce ??
+    ((c, branch, slug) => restFindOpenPrForBranchOnce(c, branch, slug, ghRaw));
+  const { pr: existing, res } = await lookup(cwd, job.input.branch, job.repoSlug);
+  if (isGithubRateLimitResult(res)) {
+    const resets = await fetchRateLimitResets(cwd, ghRaw);
+    const resetAt = Math.max(resets?.core ?? 0, resets?.graphql ?? 0) || undefined;
+    const until = resetAt != null ? new Date(resetAt * 1000).toLocaleTimeString() : "later";
+    throw new ContinueJobError(
+      `GitHub rate limit; retry continue after ${until}`,
+      "rate_limited",
+      job.stage,
+      resetAt,
+    );
+  }
   if (!existing) return false;
   job.prUrl = existing.url;
   job.prNumber = existing.number;

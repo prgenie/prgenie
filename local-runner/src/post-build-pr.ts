@@ -1,12 +1,52 @@
 import type { GhResult } from "./spawn-cmd.js";
 import type { PrInfo } from "./github.js";
-import { ghWithGithubRetry, isTransientGithubFailure } from "./github-rate-limit.js";
+import {
+  ghWithGithubRetry,
+  isTransientGithubFailure,
+  type GithubRetryBackoffInfo,
+} from "./github-rate-limit.js";
 import { resolveRepoSlug, restCreateDraftPull, restFindOpenPrForBranch } from "./github-rest.js";
+
+export type PostBuildPrHooks = {
+  log?: (line: string) => void | Promise<void>;
+  onWait?: (info: {
+    reason: string;
+    delayMs: number;
+    untilIso?: string;
+    resetAtEpochSec?: number | null;
+  }) => void | Promise<void>;
+  maxWaitMs?: number;
+  sleep?: (ms: number) => Promise<void>;
+};
 
 export type GitGh = {
   git: (cwd: string, args: string[]) => Promise<GhResult>;
   gh: (cwd: string, args: string[]) => Promise<GhResult>;
 };
+
+function ghForPostBuild(base: GitGh["gh"], hooks?: PostBuildPrHooks): GitGh["gh"] {
+  return (cwd, args) =>
+    ghWithGithubRetry(cwd, args, base, {
+      maxWaitMs: hooks?.maxWaitMs,
+      sleep: hooks?.sleep,
+      onBackoff: async (info: GithubRetryBackoffInfo) => {
+        const untilIso =
+          info.resetAtEpochSec != null
+            ? new Date(info.resetAtEpochSec * 1000).toISOString()
+            : new Date(Date.now() + info.delayMs).toISOString();
+        const reason = "waiting on GitHub rate limit";
+        await hooks?.log?.(
+          `post-build: ${reason}, sleeping ${Math.round(info.delayMs / 1000)}s (attempt ${info.attempt + 1})`,
+        );
+        await hooks?.onWait?.({
+          reason,
+          delayMs: info.delayMs,
+          untilIso,
+          resetAtEpochSec: info.resetAtEpochSec,
+        });
+      },
+    });
+}
 
 export async function workingTreeDirty(cwd: string, git: GitGh["git"]): Promise<boolean> {
   const st = await git(cwd, ["status", "--porcelain"]);
@@ -106,13 +146,20 @@ export type EnsureDraftPrInput = {
 export async function ensureDraftPrAfterBuild(
   input: EnsureDraftPrInput,
   deps: GitGh,
+  hooks?: PostBuildPrHooks,
 ): Promise<{ ok: true; pr: PrInfo } | { ok: false; error: string; transient?: boolean }> {
   const commitMsg = input.title?.trim() || `Updates for ${input.branch}`;
+  const gh = ghForPostBuild(deps.gh, hooks);
+  if (await workingTreeDirty(input.cwd, deps.git)) {
+    await hooks?.log?.("post-build: committing local changes");
+  }
   const committed = await commitAllIfDirty(input.cwd, commitMsg, deps.git);
   if (!committed.ok) return committed;
+  await hooks?.log?.(`post-build: pushing branch ${input.branch}`);
   const pushed = await pushBranch(input.cwd, input.branch, deps.git);
   if (!pushed.ok) return pushed;
-  return createDraftPr(input.cwd, input.branch, commitMsg, deps.gh, {
+  await hooks?.log?.("post-build: linking or opening pull request");
+  return createDraftPr(input.cwd, input.branch, commitMsg, gh, {
     repoSlug: input.repoSlug,
     prUrl: input.prUrl,
   });
