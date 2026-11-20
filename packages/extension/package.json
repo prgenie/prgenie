@@ -11,7 +11,7 @@
     "directory": "packages/extension"
   },
   "bugs": "https://github.com/radiancelux/prgenie/issues",
-  "homepage": "https://github.com/radiancelux/prgenie#readme",
+  "homepage": "https://prgenie.ai",
   "author": "PR Genie contributors",
   "engines": {
     "vscode": "^1.85.0"

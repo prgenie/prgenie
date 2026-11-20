@@ -9,7 +9,7 @@
     "url": "https://github.com/radiancelux/prgenie.git"
   },
   "bugs": "https://github.com/radiancelux/prgenie/issues",
-  "homepage": "https://github.com/radiancelux/prgenie#readme",
+  "homepage": "https://prgenie.ai",
   "author": "PR Genie contributors",
   "packageManager": "pnpm@10.33.0",
   "engines": {

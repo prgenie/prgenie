@@ -2,6 +2,8 @@
 
 Local **implement → PR → review → fix** runner for agent workstations. Install once, wire your MCP client to **stdio** (`npx -y prgenie mcp`), and start jobs without running a long-lived HTTP server or bearer token.
 
+Website: [prgenie.ai](https://prgenie.ai)
+
 Optional: `prgenie serve` for a browser dashboard and HTTP MCP (localhost + token).
 
 Requires **Node.js 22+**, **git**, **GitHub CLI (`gh`)**, and **`cursor-agent`** for real (non–dry-run) jobs.
