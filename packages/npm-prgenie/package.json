@@ -9,7 +9,7 @@
     "directory": "packages/npm-prgenie"
   },
   "bugs": "https://github.com/radiancelux/prgenie/issues",
-  "homepage": "https://github.com/radiancelux/prgenie/tree/main/packages/npm-prgenie#readme",
+  "homepage": "https://prgenie.ai",
   "author": "PR Genie contributors",
   "type": "commonjs",
   "engines": {

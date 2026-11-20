@@ -1,6 +1,6 @@
 # PR Genie
 
-Local pull requests for agent work. GitHub when you say so.
+Local pull requests for agent work. GitHub when you say so. Website: [prgenie.ai](https://prgenie.ai)
 
 PR Genie gives you a **git-native review lane** before anything hits GitHub: branch, diff, comments, and status live in your repo until you export. Two install paths share the name `prgenie` but solve different problems — read [Which PR Genie do I need?](#which-pr-genie-do-i-need) first.
 
