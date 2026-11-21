@@ -42,7 +42,7 @@ export function unknownRunnerCommandMessage(cmd: string): string {
     return (
       `unknown command: ${cmd} — \`${cmd}\` is a command of the PR Genie plugin/monorepo CLI, not the npm runner. ` +
       `Install from source and use \`pnpm cli ${cmd}\` or \`node packages/cli/dist/prgenie.cjs ${cmd}\` ` +
-      `(see https://github.com/prgenie/prgenie#install-from-source-monorepo-cursor-plugin-extension).`
+      `(see https://github.com/radiancelux/prgenie#install-from-source-monorepo-cursor-plugin-extension).`
     );
   }
   return `unknown command: ${cmd}`;
