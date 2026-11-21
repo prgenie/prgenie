@@ -12,6 +12,10 @@ import { planCursorAgentSpawn } from "../agent-prompt-delivery.js";
 import { childProcessSpawnOptions } from "../spawn-options.js";
 import { binaryOnPath, escalatingKill } from "./driver-types.js";
 import { WATCHDOG_CHILD_GRACE_MS } from "../runner-policy.js";
+import {
+  promptIncludesProveItWorksSection,
+  STUB_PROVE_EVIDENCE_OUTPUT,
+} from "../prove-it-works.js";
 
 async function runSpawnedCli(
   binary: string,
@@ -287,11 +291,16 @@ export const slowDryRunDriver: AgentDriver = {
       },
     };
     const result = sleep.then(async () => {
+      const needsProve = promptIncludesProveItWorksSection(opts.prompt);
+      const prove = needsProve ? `\n${STUB_PROVE_EVIDENCE_OUTPUT}` : "";
       const fake =
-        `[dry-run] slow agent (${delay}ms) in ${opts.cwd}\n` + `${opts.prompt.slice(0, 120)}...\n`;
+        `[dry-run] slow agent (${delay}ms) in ${opts.cwd}\n` +
+        `${opts.prompt.slice(0, 120)}...\n` +
+        prove;
+      const agentMessage = needsProve ? STUB_PROVE_EVIDENCE_OUTPUT : "ok";
       await hooks.appendLog(fake);
       hooks.onLine(fake);
-      hooks.onLine('{"type":"assistant","message":{"content":[{"type":"text","text":"ok"}]}}');
+      hooks.onLine(`{"type":"result","result":${JSON.stringify(agentMessage)}}\n`);
       return { code: 0, output: fake };
     });
     return { handle, result };

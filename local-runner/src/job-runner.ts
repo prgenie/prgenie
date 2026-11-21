@@ -64,6 +64,7 @@ import { ensureDraftPrAfterBuild } from "./post-build-pr.js";
 import { git as defaultGit, gh as defaultGh } from "./github.js";
 import { maybeCleanupJobWorktree } from "./worktree-cleanup.js";
 import { readStagePromptFile, type PromptFileBases } from "./prompt-file.js";
+import { hasProveEvidence, proveEvidenceGateApplies } from "./prove-it-works.js";
 
 export type JobCallbacks = {
   onEvent?: (jobId: string, event: JobEvent) => void;
@@ -300,6 +301,37 @@ async function runnerLog(cb: JobCallbacks | undefined, job: JobRecord, line: str
   emit(cb, job, { type: "log", line });
 }
 
+const PROVE_EVIDENCE_FAIL =
+  "Stage finished without PROVE: EVIDENCE (run the real artifact/tests and include command + output in the agent message).";
+
+/** Default implement/fix prompts require real verification output; custom prompt files opt out. */
+async function acceptProveEvidenceOrFail(
+  config: RunnerConfig,
+  job: JobRecord,
+  control: JobControl,
+  stage: "building" | "fixing",
+  output: string,
+  outputFormat: "stream-json" | "text",
+  promptFile: string | undefined | null,
+  callbacks: JobCallbacks | undefined,
+  onReject?: () => void,
+): Promise<boolean> {
+  if (!proveEvidenceGateApplies(promptFile)) return true;
+  // Code dry runs without a prompt file use a placeholder implementor pass (#195).
+  if (stage === "building" && job.dryRun && !job.input.promptFile?.trim() && !isDocsJob(job))
+    return true;
+  if (hasProveEvidence(output, outputFormat)) return true;
+  await runnerLog(
+    callbacks,
+    job,
+    `[runner] ${stage} agent exited 0 but produced no PROVE: EVIDENCE block with command output.`,
+  );
+  job.error = PROVE_EVIDENCE_FAIL;
+  onReject?.();
+  await setStage(config, job, "failed", control, callbacks);
+  return false;
+}
+
 function isTransientPersistError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
   return /EPERM|EBUSY|EACCES|Failed to rename temp JSON/i.test(msg);
@@ -412,6 +444,20 @@ async function runFixStage(
       job.error = `fixer exited ${fixRun.code}`;
       await setStage(config, job, "failed", control, callbacks);
     }
+    return false;
+  }
+  if (
+    !(await acceptProveEvidenceOrFail(
+      config,
+      job,
+      control,
+      "fixing",
+      fixRun.output,
+      outputFormat,
+      job.input.fixPromptFile,
+      callbacks,
+    ))
+  ) {
     return false;
   }
   if (!(await ensurePushedBeforeReview(config, job, wt, control, callbacks))) return false;
@@ -606,6 +652,23 @@ export async function runJobLoop(
           job.error = `implementor exited ${result.code}`;
           job.postBuildPendingPr = false;
           await setStage(config, job, "failed", control, callbacks);
+          return;
+        }
+        if (
+          !(await acceptProveEvidenceOrFail(
+            config,
+            job,
+            control,
+            "building",
+            result.output,
+            outputFormat,
+            job.input.promptFile,
+            callbacks,
+            () => {
+              job.postBuildPendingPr = false;
+            },
+          ))
+        ) {
           return;
         }
         job.postBuildPendingPr = true;

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Runner: default implement and fix prompts require real verification evidence (`PROVE: EVIDENCE` with command output); custom prompt files opt out (#246).
+
 ## 0.1.6 — 2026-11-08
 
 - Fix `prgenie --version` reporting 0.1.4 in the 0.1.5 package (stale bundle was published).
