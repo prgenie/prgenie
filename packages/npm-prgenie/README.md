@@ -27,21 +27,21 @@ $env:Path = "C:\Program Files\Git\bin;" + $env:Path
 
 macOS/Linux Cursor CLI: `curl https://cursor.com/install -fsS | bash`, then open a new terminal and run `cursor-agent login`.
 
-**Published 0.1.4 note:** on Windows, doctor and real (non–dry-run) jobs may fail to find `cursor-agent` when the CLI installs only `%LOCALAPPDATA%\cursor-agent\*.ps1` scripts. That resolution fix ships in the next npm release after 0.1.4 (#184).
+**Older releases:** on prgenie 0.1.4 and earlier, Windows doctor and real (non–dry-run) jobs may fail to find `cursor-agent` when the CLI installs only `%LOCALAPPDATA%\cursor-agent\*.ps1` scripts. Fixed in 0.1.6 (#184); upgrade with `npm install -g prgenie@latest`.
 
 ## Install (recommended: system-level)
 
 The runner is a per-machine tool, so register it once for every repo rather than per project:
 
 - **`npx` (recommended, no install):** every snippet below runs `npx -y prgenie mcp`. npm caches the package after the first launch.
-- **Fallback: global install.** Use this if `npx` is slow or unreliable on your network: `npm install -g prgenie` (or pin `prgenie@0.1.3`), then use `"command": "prgenie", "args": ["mcp"]` in MCP config. Upgrade with `npm install -g prgenie@latest`.
+- **Fallback: global install.** Use this if `npx` is slow or unreliable on your network: `npm install -g prgenie` (or pin a version, e.g. `prgenie@0.1.7`), then use `"command": "prgenie", "args": ["mcp"]` in MCP config. Upgrade with `npm install -g prgenie@latest`.
 - **When to switch to global:** On a flaky DNS cache, `npx -y prgenie mcp` can take well over a minute to fail, and many MCP hosts time out first. Global install also helps GUI apps that do not inherit your shell `PATH` (see [Troubleshooting](#troubleshooting)).
 
 A repo-local devDependency also works but is optional; see [Optional: project devDependency](#optional-project-devdependency).
 
 ## Quick start — MCP client config
 
-The MCP config snippets below work with every published release (0.1.3 and later). Features marked **Requires prgenie 0.1.4 or later** are documented ahead of release; on 0.1.3 they are missing or behave differently. No token is required for stdio. The server id `prgenie-runner` keeps this separate from the Cursor plugin's `prgenie` steward MCP.
+The MCP config snippets below work with every published release (0.1.3 and later). Features marked **Requires prgenie 0.1.4 or later** are missing or behave differently on 0.1.3. No token is required for stdio. The server id `prgenie-runner` keeps this separate from the Cursor plugin's `prgenie` steward MCP.
 
 ### Cursor (`.cursor/mcp.json` in your repo or user config)
 
@@ -231,7 +231,7 @@ Optional notify emails fire when a job opens/updates a PR and when the loop fini
 
 ## Windows notes
 
-- On Windows, **`prgenie init`** prints the PowerShell token override (and an optional Git Bash line). Unreleased after 0.1.4: it no longer leads with the bash `export` line in PowerShell sessions.
+- On Windows, **`prgenie init`** prints the PowerShell token override (and an optional Git Bash line). Since 0.1.6, it no longer leads with the bash `export` line in PowerShell sessions.
 
   ```powershell
   $env:PRGENIE_RUNNER_TOKEN = Get-Content -Raw 'C:\Users\you\.prgenie\local-runner\runner.token'
