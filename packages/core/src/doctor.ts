@@ -173,7 +173,7 @@ export async function runDoctor(
   const workspaceMcpPath = path.join(root, ".cursor", "mcp.json");
   const installedMcpJson = path.join(installedPlugin, "mcp.json");
   const sourceMcpJson = packageRoot
-    ? path.join(packageRoot, "packages", "plugin", "mcp.json")
+    ? path.join(packageRoot, "packages", "plugin", "mcp.plugin.json")
     : null;
 
   const workspaceInspect = existsSync(workspaceMcpPath)
