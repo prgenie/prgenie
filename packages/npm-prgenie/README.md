@@ -34,7 +34,7 @@ macOS/Linux Cursor CLI: `curl https://cursor.com/install -fsS | bash`, then open
 The runner is a per-machine tool, so register it once for every repo rather than per project:
 
 - **`npx` (recommended, no install):** every snippet below runs `npx -y prgenie mcp`. npm caches the package after the first launch.
-- **Fallback: global install.** Use this if `npx` is slow or unreliable on your network: `npm install -g prgenie` (or pin a version, e.g. `prgenie@0.1.7`), then use `"command": "prgenie", "args": ["mcp"]` in MCP config. Upgrade with `npm install -g prgenie@latest`.
+- **Fallback: global install.** Use this if `npx` is slow or unreliable on your network: `npm install -g prgenie` (or pin a version, e.g. `prgenie@0.1.8`), then use `"command": "prgenie", "args": ["mcp"]` in MCP config. Upgrade with `npm install -g prgenie@latest`.
 - **When to switch to global:** On a flaky DNS cache, `npx -y prgenie mcp` can take well over a minute to fail, and many MCP hosts time out first. Global install also helps GUI apps that do not inherit your shell `PATH` (see [Troubleshooting](#troubleshooting)).
 
 A repo-local devDependency also works but is optional; see [Optional: project devDependency](#optional-project-devdependency).
