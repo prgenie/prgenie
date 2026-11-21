@@ -14,7 +14,7 @@ Open http://127.0.0.1:8080/
 
 ## Cloudflare Pages
 
-1. In Cloudflare Pages, connect the [radiancelux/prgenie](https://github.com/radiancelux/prgenie) repository.
+1. In Cloudflare Pages, connect the [prgenie/prgenie](https://github.com/prgenie/prgenie) repository.
 2. **Build command:** leave empty.
 3. **Build output directory:** `site`
 4. Attach the custom domain `prgenie.ai` (and optionally redirect `www` to the apex) in the Cloudflare dashboard.

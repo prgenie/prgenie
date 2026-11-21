@@ -244,7 +244,7 @@ Optional notify emails fire when a job opens/updates a PR and when the loop fini
 
 ## Two different `prgenie` CLIs?
 
-The **npm package** (this README) is the runner. **`prgenie list` / `create` / `export`** belong to the [monorepo plugin CLI](https://github.com/radiancelux/prgenie#which-prgenie-do-i-need) — not this binary. The runner prints a hint if you run those command names (**requires prgenie 0.1.4 or later**; 0.1.3 prints only `unknown command`).
+The **npm package** (this README) is the runner. **`prgenie list` / `create` / `export`** belong to the [monorepo plugin CLI](https://github.com/prgenie/prgenie#which-prgenie-do-i-need) — not this binary. The runner prints a hint if you run those command names (**requires prgenie 0.1.4 or later**; 0.1.3 prints only `unknown command`).
 
 ## Troubleshooting
 
@@ -274,7 +274,7 @@ The **npm package** (this README) is the runner. **`prgenie list` / `create` / `
 
 ## Monorepo development
 
-Source lives under `local-runner/` in [github.com/radiancelux/prgenie](https://github.com/radiancelux/prgenie). From the repo root: `pnpm build && pnpm local-runner mcp`.
+Source lives under `local-runner/` in [github.com/prgenie/prgenie](https://github.com/prgenie/prgenie). From the repo root: `pnpm build && pnpm local-runner mcp`.
 
 ## License
 
