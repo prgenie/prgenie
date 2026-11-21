@@ -1,14 +1,14 @@
 {
   "name": "prgenie",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "PR Genie local runner — MCP stdio job loop (implement → PR → review → fix)",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/radiancelux/prgenie.git",
+    "url": "https://github.com/prgenie/prgenie.git",
     "directory": "packages/npm-prgenie"
   },
-  "bugs": "https://github.com/radiancelux/prgenie/issues",
+  "bugs": "https://github.com/prgenie/prgenie/issues",
   "homepage": "https://prgenie.ai",
   "author": "PR Genie contributors",
   "type": "commonjs",

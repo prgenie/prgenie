@@ -1,14 +1,14 @@
 {
   "name": "prgenie",
   "private": true,
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Local pull requests for agent work. GitHub when you say so.",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/radiancelux/prgenie.git"
+    "url": "https://github.com/prgenie/prgenie.git"
   },
-  "bugs": "https://github.com/radiancelux/prgenie/issues",
+  "bugs": "https://github.com/prgenie/prgenie/issues",
   "homepage": "https://prgenie.ai",
   "author": "PR Genie contributors",
   "packageManager": "pnpm@10.33.0",

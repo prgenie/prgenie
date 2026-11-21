@@ -34,7 +34,7 @@ macOS/Linux Cursor CLI: `curl https://cursor.com/install -fsS | bash`, then open
 The runner is a per-machine tool, so register it once for every repo rather than per project:
 
 - **`npx` (recommended, no install):** every snippet below runs `npx -y prgenie mcp`. npm caches the package after the first launch.
-- **Fallback: global install.** Use this if `npx` is slow or unreliable on your network: `npm install -g prgenie` (or pin a version, e.g. `prgenie@0.1.7`), then use `"command": "prgenie", "args": ["mcp"]` in MCP config. Upgrade with `npm install -g prgenie@latest`.
+- **Fallback: global install.** Use this if `npx` is slow or unreliable on your network: `npm install -g prgenie` (or pin a version, e.g. `prgenie@0.1.8`), then use `"command": "prgenie", "args": ["mcp"]` in MCP config. Upgrade with `npm install -g prgenie@latest`.
 - **When to switch to global:** On a flaky DNS cache, `npx -y prgenie mcp` can take well over a minute to fail, and many MCP hosts time out first. Global install also helps GUI apps that do not inherit your shell `PATH` (see [Troubleshooting](#troubleshooting)).
 
 A repo-local devDependency also works but is optional; see [Optional: project devDependency](#optional-project-devdependency).
@@ -244,7 +244,7 @@ Optional notify emails fire when a job opens/updates a PR and when the loop fini
 
 ## Two different `prgenie` CLIs?
 
-The **npm package** (this README) is the runner. **`prgenie list` / `create` / `export`** belong to the [monorepo plugin CLI](https://github.com/radiancelux/prgenie#which-prgenie-do-i-need) — not this binary. The runner prints a hint if you run those command names (**requires prgenie 0.1.4 or later**; 0.1.3 prints only `unknown command`).
+The **npm package** (this README) is the runner. **`prgenie list` / `create` / `export`** belong to the [monorepo plugin CLI](https://github.com/prgenie/prgenie#which-prgenie-do-i-need) — not this binary. The runner prints a hint if you run those command names (**requires prgenie 0.1.4 or later**; 0.1.3 prints only `unknown command`).
 
 ## Troubleshooting
 
@@ -274,7 +274,7 @@ The **npm package** (this README) is the runner. **`prgenie list` / `create` / `
 
 ## Monorepo development
 
-Source lives under `local-runner/` in [github.com/radiancelux/prgenie](https://github.com/radiancelux/prgenie). From the repo root: `pnpm build && pnpm local-runner mcp`.
+Source lives under `local-runner/` in [github.com/prgenie/prgenie](https://github.com/prgenie/prgenie). From the repo root: `pnpm build && pnpm local-runner mcp`.
 
 ## License
 

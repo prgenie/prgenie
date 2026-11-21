@@ -1,13 +1,13 @@
 {
   "name": "@prgenie/cli",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/radiancelux/prgenie.git",
+    "url": "https://github.com/prgenie/prgenie.git",
     "directory": "packages/cli"
   },
-  "bugs": "https://github.com/radiancelux/prgenie/issues",
+  "bugs": "https://github.com/prgenie/prgenie/issues",
   "homepage": "https://prgenie.ai",
   "author": "PR Genie contributors",
   "type": "module",
