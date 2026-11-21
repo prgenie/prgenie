@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "prgenie-runner": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "prgenie", "mcp"]
+    }
+  }
+}
