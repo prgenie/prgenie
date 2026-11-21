@@ -20,10 +20,7 @@ describe("architect plan prompt contract (#247)", () => {
     assert.ok(planIdx < proveIdx, "architect section must precede prove-it-works");
     assert.match(DEFAULT_IMPLEMENT_PROMPT, /types.*signatures/i);
     assert.match(DEFAULT_IMPLEMENT_PROMPT, /two shapes/i);
-    assert.match(
-      DEFAULT_IMPLEMENT_PROMPT,
-      new RegExp(ARCHITECT_PLAN_HEADING.replace(":", "\\:")),
-    );
+    assert.match(DEFAULT_IMPLEMENT_PROMPT, new RegExp(ARCHITECT_PLAN_HEADING.replace(":", "\\:")));
     assert.ok(DEFAULT_IMPLEMENT_PROMPT.includes(PSTACK_ARCHITECT_ATTRIBUTION));
     assert.match(DEFAULT_IMPLEMENT_PROMPT, /gh pr create --draft/);
     assert.match(DEFAULT_IMPLEMENT_PROMPT, /Do not merge/);
