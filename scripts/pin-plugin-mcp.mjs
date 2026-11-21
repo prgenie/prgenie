@@ -2,7 +2,7 @@
  * Pin the copied plugin mcp.json so Cursor can spawn on Windows.
  * Keep mutations aligned with packages/core/src/plugin-mcp.ts pinPluginMcpJson.
  */
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
@@ -20,6 +20,13 @@ if (!existsSync(path.join(dest, "mcp", "server.cjs"))) {
   );
   process.exit(1);
 }
+// Source ships mcp.plugin.json (not mcp.json) so repo scanners don't list the
+// plugin's unbuilt server as an installable MCP; the installed copy gets mcp.json.
+const templatePath = path.join(dest, "mcp.plugin.json");
+if (!existsSync(mcpPath) && existsSync(templatePath)) {
+  writeFileSync(mcpPath, readFileSync(templatePath, "utf8"), { encoding: "utf8" });
+}
+if (existsSync(templatePath)) rmSync(templatePath);
 let raw = readFileSync(mcpPath, "utf8");
 if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
 

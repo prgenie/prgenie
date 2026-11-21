@@ -225,7 +225,7 @@ test("MCP timeout covers max slot wait plus package-test timeout", async () => {
   assert.equal(MCP_SERVER_TIMEOUT_SEC, 4200);
   const mcpJson = JSON.parse(
     await readFile(
-      path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../plugin/mcp.json"),
+      path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../plugin/mcp.plugin.json"),
       "utf8",
     ),
   ) as { mcpServers: { prgenie: { timeout?: number } } };
