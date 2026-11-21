@@ -8,7 +8,7 @@ Security fixes are applied on the default branch (`main`) and may be backported 
 
 **Please do not open a public GitHub issue for security-sensitive reports.**
 
-Report vulnerabilities privately using [GitHub Security Advisories](https://github.com/prgenie/prgenie/security/advisories/new):
+Report vulnerabilities privately using [GitHub Security Advisories](https://github.com/radiancelux/prgenie/security/advisories/new):
 
 1. Open the advisories page for this repository.
 2. Choose **Report a vulnerability**.

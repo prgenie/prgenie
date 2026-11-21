@@ -4,10 +4,10 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/prgenie/prgenie.git",
+    "url": "https://github.com/radiancelux/prgenie.git",
     "directory": "packages/core"
   },
-  "bugs": "https://github.com/prgenie/prgenie/issues",
+  "bugs": "https://github.com/radiancelux/prgenie/issues",
   "homepage": "https://prgenie.ai",
   "author": "PR Genie contributors",
   "type": "module",

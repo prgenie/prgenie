@@ -171,7 +171,7 @@ MCP `start_job`:
 
 ```json
 {
-  "repoPath": "/path/to/prgenie/prgenie",
+  "repoPath": "/path/to/radiancelux/prgenie",
   "branch": "feat/my-ticket",
   "promptFile": "/path/to/implementor-prompt.md",
   "maxRounds": 2
