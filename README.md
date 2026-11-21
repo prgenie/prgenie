@@ -37,7 +37,7 @@ _Screenshot: the **npm runner** HTTP dashboard (`npx -y prgenie serve`), not the
 
 ## Quick start (npm runner)
 
-For the **published runner** (npm **0.1.4** on `main`; some Windows fixes below ship in the next release after 0.1.4): MCP stdio job loop without cloning this repo.
+For the **published runner** (npm `prgenie`): MCP stdio job loop without cloning this repo.
 
 Requires **Node.js 22+**, **git**, **`gh`**, and **`cursor-agent`** for real (non–dry-run) jobs. Full walkthrough: [packages/npm-prgenie/README.md](packages/npm-prgenie/README.md).
 
@@ -56,7 +56,7 @@ Open a **new PowerShell window** after each install so `PATH` updates.
 4. **Cursor CLI** — `irm 'https://cursor.com/install?win32=true' | iex`, new window, then `cursor-agent login`  
    (macOS/Linux: `curl https://cursor.com/install -fsS | bash`.)
 
-On **prgenie 0.1.4**, doctor and real jobs may not detect `cursor-agent` when Windows installs only `.ps1` scripts under `%LOCALAPPDATA%\cursor-agent` — fixed on `main` after 0.1.4 (#184).
+If doctor or real jobs cannot find `cursor-agent` on Windows (the CLI installed only `.ps1` scripts under `%LOCALAPPDATA%\cursor-agent`), upgrade: prgenie 0.1.4 and earlier had this bug, fixed in 0.1.6 (#184).
 
 ```bash
 npx -y prgenie init
