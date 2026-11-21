@@ -14,6 +14,7 @@ import { runnerSettingsFile } from "./paths.js";
 import { createJob, loadJob } from "./store.js";
 import type { JobInput } from "./types.js";
 import { ValidationError } from "./validation-error.js";
+import { STUB_PROVE_EVIDENCE_OUTPUT } from "./prove-it-works.js";
 
 class ModelCaptureRunner extends AgentRunner {
   models: string[] = [];
@@ -21,7 +22,10 @@ class ModelCaptureRunner extends AgentRunner {
   override async run(opts: AgentRunOptions): Promise<{ code: number; output: string }> {
     this.models.push(opts.model);
     this.emit("line", '{"type":"assistant","message":{}}');
-    return { code: 0, output: "ok" };
+    const output = opts.prompt.includes("You are the fixer")
+      ? STUB_PROVE_EVIDENCE_OUTPUT
+      : "ok";
+    return { code: 0, output };
   }
 }
 

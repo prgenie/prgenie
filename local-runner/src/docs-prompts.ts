@@ -1,5 +1,6 @@
 import type { DocsTemplateId } from "./docs-settings.js";
-import { DEFAULT_FIX_PROMPT, DEFAULT_REVIEW_PROMPT } from "./prompts.js";
+import { DOCS_PROVE_IT_WORKS_SECTION } from "./prove-it-works.js";
+import { DEFAULT_FIX_PROMPT_BODY, DEFAULT_REVIEW_PROMPT } from "./prompts.js";
 
 const DOCS_PATH_HINT = `Write Markdown only under existing doc layout or new paths under \`docs/\`, \`policies/\`, or \`marketing/\`.
 Open a **draft** PR against this repository (not a code repo):
@@ -11,19 +12,25 @@ export const DOCS_MARKETING_PROMPT = `You are a marketing writer producing Markd
 
 Deliver landing copy, email snippets, social posts, or product blurbs as requested in the task.
 If the repo has a brand voice or style guide (README, docs/style*, marketing/*), follow it.
-${DOCS_PATH_HINT}`;
+${DOCS_PATH_HINT}
+
+${DOCS_PROVE_IT_WORKS_SECTION}`;
 
 export const DOCS_POLICY_PROMPT = `You are an internal policy writer producing Markdown for a business repository.
 
 Draft employee, operations, or legal policy documents. Cite and cross-link existing policies in the repo when relevant.
 Flag gaps or ambiguities — do not invent binding rules without sources.
-${DOCS_PATH_HINT}`;
+${DOCS_PATH_HINT}
+
+${DOCS_PROVE_IT_WORKS_SECTION}`;
 
 export const DOCS_RESEARCH_PROMPT = `You are a research writer producing a Markdown research brief for a business repository.
 
 Cover the assigned topic with **sources cited** (URLs). Do not fabricate facts or statistics.
 Use web search and fetch when you need current information; prefer primary sources.
-${DOCS_PATH_HINT}`;
+${DOCS_PATH_HINT}
+
+${DOCS_PROVE_IT_WORKS_SECTION}`;
 
 export const DOCS_REVIEW_PROMPT = `You are the reviewer for a **documentation** pull request (Markdown only).
 
@@ -61,9 +68,11 @@ export function resolveDocsReviewPrompt(reviewPromptFile?: string): string {
 }
 
 export function resolveDocsFixPrompt(): string {
-  return `${DEFAULT_FIX_PROMPT}
+  return `${DEFAULT_FIX_PROMPT_BODY}
 
-Focus on Markdown doc feedback only. Keep changes in doc paths.`;
+Focus on Markdown doc feedback only. Keep changes in doc paths.
+
+${DOCS_PROVE_IT_WORKS_SECTION}`;
 }
 
 export { DEFAULT_REVIEW_PROMPT };
