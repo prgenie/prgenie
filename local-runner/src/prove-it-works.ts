@@ -62,3 +62,10 @@ export function hasProveEvidence(output: string, format: "stream-json" | "text")
 export function proveEvidenceGateApplies(promptFile: string | undefined | null): boolean {
   return !promptFile?.trim();
 }
+
+/** True when a stage prompt embeds a default Prove it works section (implement/fix/docs). */
+export function promptIncludesProveItWorksSection(prompt: string): boolean {
+  return (
+    prompt.includes(CODE_PROVE_IT_WORKS_SECTION) || prompt.includes(DOCS_PROVE_IT_WORKS_SECTION)
+  );
+}

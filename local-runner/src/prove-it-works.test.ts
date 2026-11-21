@@ -9,6 +9,7 @@ import {
   PSTACK_PROVE_IT_WORKS_ATTRIBUTION,
   hasProveEvidence,
   proveEvidenceGateApplies,
+  promptIncludesProveItWorksSection,
 } from "./prove-it-works.js";
 
 const SAMPLE_EVIDENCE = `${PROVE_EVIDENCE_HEADING}
@@ -54,5 +55,7 @@ describe("prove-it-works prompt contract (#246)", () => {
   it("gates default prompts only when no custom prompt file is set", () => {
     assert.equal(proveEvidenceGateApplies(""), true);
     assert.equal(proveEvidenceGateApplies("prompts/x.md"), false);
+    assert.equal(promptIncludesProveItWorksSection(DEFAULT_IMPLEMENT_PROMPT), true);
+    assert.equal(promptIncludesProveItWorksSection("Build the feature.\n"), false);
   });
 });
