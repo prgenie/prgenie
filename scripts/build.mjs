@@ -101,6 +101,14 @@ copyFileSync(
   path.join(root, "local-runner/dist/markdownlint-prose-defaults.jsonc"),
   path.join(npmRunnerDir, "markdownlint-prose-defaults.jsonc"),
 );
+copyFileSync(
+  path.join(root, "local-runner/src/scoped-ci/prgenie-core.runtime.mjs"),
+  path.join(root, "local-runner/dist/prgenie-core.runtime.mjs"),
+);
+copyFileSync(
+  path.join(root, "local-runner/dist/prgenie-core.runtime.mjs"),
+  path.join(npmRunnerDir, "prgenie-core.runtime.mjs"),
+);
 
 console.log("PR Genie build complete.");
 await esbuild.stop();

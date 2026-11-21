@@ -27,9 +27,11 @@ Before you finish this stage, verify against the real artifact: run the tests or
 
 When a check fails, suspect your observation method before the system, then fix the problem or report the failure with evidence. A failed check means this stage is not done until it passes or you document the failure with evidence.
 
+Before you finish, run the same **scoped** CI checks the target repo uses (format/lint/typecheck/test as applicable to the files you touched — not the full monorepo suite unless shared config or lockfiles changed). The runner will re-run these checks before push; your evidence must match what you actually ran.
+
 Include a section in your final message headed exactly:
 ${PROVE_EVIDENCE_HEADING}
-Under it, paste the command(s) you ran and the relevant output (trim only if enormous). When a PR exists, also add the same evidence to the PR body or a PR comment so the reviewer and fixer can see it.
+Under it, for **each** CI command you ran, list: the command, what files or packages it covered (scope), exit code, and a short output excerpt (trim only if enormous). When a PR exists, also add the same evidence to the PR body or a PR comment so the reviewer and fixer can see it.
 
 ${PSTACK_PROVE_IT_WORKS_ATTRIBUTION}`;
 
@@ -38,9 +40,9 @@ Before you finish this stage, verify the documentation against reality: fetch or
 
 When verification fails, suspect your observation method before dismissing the claim, then fix the doc or report the failure with evidence. A failed check means this stage is not done until it passes or you document the failure with evidence.
 
-Include a section in your final message headed exactly:
+Run proportional checks on the Markdown you changed (for example \`format:check\` on those paths when the repo provides it). List each command, scope, exit code, and a short excerpt under:
 ${PROVE_EVIDENCE_HEADING}
-Under it, paste the commands or fetches you ran, paths you verified, and short excerpts proving the doc matches reality. When a PR exists, also add the same evidence to the PR body or a PR comment.
+Also paste the commands or fetches you ran, paths you verified, and short excerpts proving the doc matches reality. When a PR exists, also add the same evidence to the PR body or a PR comment.
 
 ${PSTACK_PROVE_IT_WORKS_ATTRIBUTION}`;
 

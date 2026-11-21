@@ -25,7 +25,7 @@ describe("prove-it-works prompt contract (#246)", () => {
       assert.match(prompt, /Proxies do not count/i);
       assert.match(prompt, /self-reports/i);
       assert.match(prompt, new RegExp(PROVE_EVIDENCE_HEADING.replace(":", "\\:")));
-      assert.match(prompt, /command\(s\) you ran/i);
+      assert.match(prompt, /each.*CI command/i);
       assert.ok(prompt.includes(PSTACK_PROVE_IT_WORKS_ATTRIBUTION));
     }
     assert.ok(DEFAULT_IMPLEMENT_PROMPT.includes(CODE_PROVE_IT_WORKS_SECTION));
