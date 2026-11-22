@@ -1,4 +1,5 @@
 import { CODE_ARCHITECT_PLAN_SECTION } from "./architect-plan.js";
+import { CODE_REVIEW_BLAST_RADIUS_SECTION } from "./blast-radius-review.js";
 import { CODE_PROVE_IT_WORKS_SECTION } from "./prove-it-works.js";
 
 /** Placeholder when a dry-run code job starts without a prompt file (#195). */
@@ -20,6 +21,8 @@ Do not merge. Do not force-push to main/master.
 ${CODE_PROVE_IT_WORKS_SECTION}`;
 
 export const DEFAULT_REVIEW_PROMPT = `You are the reviewer for one GitHub pull request.
+
+${CODE_REVIEW_BLAST_RADIUS_SECTION}
 
 Read the PR diff and existing comments. Post exactly ONE GitHub issue comment on the pull request (same timeline as \`gh pr comment <N>\` or POST .../issues/<N>/comments).
 

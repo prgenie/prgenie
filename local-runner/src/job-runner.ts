@@ -64,6 +64,7 @@ import { ensureDraftPrAfterBuild } from "./post-build-pr.js";
 import { git as defaultGit, gh as defaultGh } from "./github.js";
 import { maybeCleanupJobWorktree } from "./worktree-cleanup.js";
 import { readStagePromptFile, type PromptFileBases } from "./prompt-file.js";
+import { reviewRoundSupplement } from "./blast-radius-review.js";
 import { hasProveEvidence, proveEvidenceGateApplies } from "./prove-it-works.js";
 import { runPrePushCiGate } from "./pre-push-ci-gate.js";
 
@@ -860,7 +861,7 @@ export async function runJobLoop(
       const reviewRoundStartedAt = new Date().toISOString();
 
       const reviewFallback = isDocsJob(job) ? DOCS_REVIEW_PROMPT : DEFAULT_REVIEW_PROMPT;
-      const reviewPrompt = await readPromptFile(
+      const reviewPromptRaw = await readPromptFile(
         "reviewPromptFile",
         job.input.reviewPromptFile ?? "",
         reviewFallback,
@@ -868,6 +869,7 @@ export async function runJobLoop(
         job,
         callbacks,
       );
+      const reviewPrompt = reviewPromptRaw + reviewRoundSupplement(job.reviewRound);
       const reviewSteer = control.drainSteer();
       const prLabel = job.dryRun ? "(dry run — simulated PR)" : String(job.prUrl);
       const reviewFull = reviewSteer
