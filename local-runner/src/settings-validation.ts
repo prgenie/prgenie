@@ -351,7 +351,10 @@ function nullableTrimmed(v: unknown): string | null {
   return v === null || v === "" ? null : String(v).trim();
 }
 
-/** Validates nested jobTypes knobs (e.g. compute watchdog) with the same rules as top-level watchdog. */
+/**
+ * Validates nested jobTypes knobs (e.g. compute watchdog) with the same rules as top-level watchdog.
+ * `jobTypes.prePushCi` is a plain object (skip/checks/commands/byRepoSlug) — parsed at gate time (#255).
+ */
 export function validateJobTypesPatch(raw: unknown): Record<string, unknown> | undefined {
   if (raw === undefined || raw === null) return undefined;
   if (!isPlainObject(raw)) throw new ValidationError("jobTypes must be an object");

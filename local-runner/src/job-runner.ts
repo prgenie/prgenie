@@ -65,6 +65,7 @@ import { git as defaultGit, gh as defaultGh } from "./github.js";
 import { maybeCleanupJobWorktree } from "./worktree-cleanup.js";
 import { readStagePromptFile, type PromptFileBases } from "./prompt-file.js";
 import { hasProveEvidence, proveEvidenceGateApplies } from "./prove-it-works.js";
+import { runPrePushCiGate } from "./pre-push-ci-gate.js";
 
 export type JobCallbacks = {
   onEvent?: (jobId: string, event: JobEvent) => void;
@@ -72,6 +73,8 @@ export type JobCallbacks = {
   fetchImpl?: FetchFn;
   agentRunner?: AgentRunner;
   watchdogTiming?: WatchdogTiming;
+  /** Injectable pre-push CI gate (tests). Defaults to {@link runPrePushCiGate}. */
+  prePushCiGate?: typeof runPrePushCiGate;
 };
 
 type WatchdogTiming = Pick<StageWatchdogOptions, "now" | "tickMs" | "childGraceMs">;
@@ -314,6 +317,39 @@ function buildingImplementFallback(job: JobRecord): string {
 }
 
 /** Default implement/fix prompts require real verification output; custom prompt files opt out. */
+async function runPrePushGateOrFail(
+  config: RunnerConfig,
+  job: JobRecord,
+  control: JobControl,
+  wt: string,
+  settings: Awaited<ReturnType<typeof loadSettings>>,
+  callbacks: JobCallbacks | undefined,
+  stage: "building" | "fixing",
+): Promise<boolean> {
+  if (job.dryRun && !callbacks?.prePushCiGate) return true;
+  const baseRef =
+    job.effectiveSnapshot?.baseRef ?? job.baseRef ?? settings.defaultBaseBranch ?? "origin/main";
+  job.statusDetail = { phase: "pre_push_ci", reason: `${stage}: scoped CI before push` };
+  await persistJob(config, job, control);
+  const gateFn = callbacks?.prePushCiGate ?? runPrePushCiGate;
+  const gate = await gateFn({
+    cwd: wt,
+    baseRef,
+    job,
+    settings,
+    onLog: (line) => runnerLog(callbacks, job, line),
+  });
+  job.statusDetail = null;
+  await persistJob(config, job, control);
+  if (gate.skipped) return true;
+  if (!gate.ok) {
+    job.error = gate.error ?? "pre-push CI failed";
+    await setStage(config, job, "failed", control, callbacks);
+    return false;
+  }
+  return true;
+}
+
 async function acceptProveEvidenceOrFail(
   config: RunnerConfig,
   job: JobRecord,
@@ -467,6 +503,9 @@ async function runFixStage(
       callbacks,
     ))
   ) {
+    return false;
+  }
+  if (!(await runPrePushGateOrFail(config, job, control, wt, settings, callbacks, "fixing"))) {
     return false;
   }
   if (!(await ensurePushedBeforeReview(config, job, wt, control, callbacks))) return false;
@@ -667,6 +706,12 @@ export async function runJobLoop(
             },
           ))
         ) {
+          return;
+        }
+        if (
+          !(await runPrePushGateOrFail(config, job, control, wt, settings, callbacks, "building"))
+        ) {
+          job.postBuildPendingPr = false;
           return;
         }
         job.postBuildPendingPr = true;
