@@ -24,6 +24,7 @@
   "files": [
     "runner.cjs",
     "markdownlint-prose-defaults.jsonc",
+    "prgenie-core.runtime.mjs",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
