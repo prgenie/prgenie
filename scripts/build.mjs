@@ -101,10 +101,17 @@ copyFileSync(
   path.join(root, "local-runner/dist/markdownlint-prose-defaults.jsonc"),
   path.join(npmRunnerDir, "markdownlint-prose-defaults.jsonc"),
 );
-copyFileSync(
-  path.join(root, "local-runner/src/scoped-ci/prgenie-core.runtime.mjs"),
-  path.join(root, "local-runner/dist/prgenie-core.runtime.mjs"),
-);
+// Bundle the scoped-CI shim with core inlined; copying it left runtime imports
+// of packages/core/src/*.ts that fail from dist/ and from npm installs.
+await esbuild.build({
+  ...shared,
+  format: "esm",
+  entryPoints: ["local-runner/src/scoped-ci/prgenie-core.runtime.mjs"],
+  outfile: "local-runner/dist/prgenie-core.runtime.mjs",
+  banner: {
+    js: 'import { createRequire as __prgenieCreateRequire } from "node:module";\nconst require = __prgenieCreateRequire(import.meta.url);',
+  },
+});
 copyFileSync(
   path.join(root, "local-runner/dist/prgenie-core.runtime.mjs"),
   path.join(npmRunnerDir, "prgenie-core.runtime.mjs"),
