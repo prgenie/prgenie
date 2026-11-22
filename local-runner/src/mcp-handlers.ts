@@ -47,6 +47,22 @@ export const RUNNER_MCP_TOOLS = [
           description:
             "Run a second challenger review after the primary reviewer (#249). Off by default; adds model cost and latency.",
         },
+        arenaImplement: {
+          type: "boolean",
+          description:
+            "Fan out N parallel implement candidates, synthesize one branch (#250). Off by default; multiplies build cost.",
+        },
+        arenaCandidates: {
+          type: "number",
+          description:
+            "Parallel arena seats when arenaImplement is on (#250); default from settings (2–4).",
+        },
+        arenaCandidateModels: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Optional per-candidate build models for arena fan-out (#250); length must not exceed arenaCandidates.",
+        },
         driver: {
           type: "string",
           description: "Agent driver id (cursor-agent, claude-code, local-model)",

@@ -15,6 +15,20 @@ export function cursorWorktreeDir(repoSlug: string, jobId: string): string {
   return path.join(managedWorktreesRoot(), repoSlug, jobId);
 }
 
+/** Isolated checkout for one arena implement candidate (#250). */
+export function arenaCandidateWorktreeDir(
+  repoSlug: string,
+  jobId: string,
+  candidateIndex: number,
+): string {
+  return path.join(managedWorktreesRoot(), repoSlug, `${jobId}-arena-${candidateIndex}`);
+}
+
+export function arenaCandidateBranch(jobBranch: string, candidateIndex: number): string {
+  const base = jobBranch.trim();
+  return `${base}--arena-c${candidateIndex}`;
+}
+
 export function jobsDir(dataDir: string): string {
   return path.join(dataDir, "jobs");
 }

@@ -1,4 +1,7 @@
 import {
+  ARENA_CANDIDATES_MAX,
+  ARENA_CANDIDATES_MIN,
+  BUILTIN_ARENA_CANDIDATES,
   BUILTIN_DEFAULT_MAX_ROUNDS,
   MAX_ACTIVE_JOBS_MAX,
   MAX_ACTIVE_JOBS_MIN,
@@ -112,6 +115,28 @@ export function validateMaxRounds(n: unknown): number | undefined {
   return validateBoundedInt(n, "maxRounds", MAX_ROUNDS_MIN, MAX_ROUNDS_MAX);
 }
 
+export function validateArenaCandidates(n: unknown): number {
+  if (n === undefined || n === null) return BUILTIN_ARENA_CANDIDATES;
+  return validateBoundedInt(n, "arenaCandidates", ARENA_CANDIDATES_MIN, ARENA_CANDIDATES_MAX);
+}
+
+export function validateArenaCandidateModels(
+  raw: unknown,
+  candidateCount: number,
+): string[] | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (!Array.isArray(raw) || raw.some((m) => typeof m !== "string")) {
+    throw new ValidationError("arenaCandidateModels must be an array of strings");
+  }
+  const trimmed = raw.map((m) => m.trim()).filter(Boolean);
+  if (trimmed.length > candidateCount) {
+    throw new ValidationError(
+      `arenaCandidateModels has ${trimmed.length} entries but arenaCandidates is ${candidateCount}`,
+    );
+  }
+  return trimmed.length ? trimmed : undefined;
+}
+
 export function validateExtraRounds(n: unknown): number {
   if (n === undefined || n === null) return 1;
   return validateBoundedInt(n, "extraRounds", 1, MAX_ROUNDS_MAX);
@@ -216,6 +241,8 @@ export function normalizeStartJobArgs(
   const dryRun = optionalBoolean(raw, "dryRun");
   const expectPr = optionalBoolean(raw, "expectPr");
   const interrogateReview = optionalBoolean(raw, "interrogateReview");
+  const arenaImplement = optionalBoolean(raw, "arenaImplement");
+  const arenaCandidatesRaw = raw.arenaCandidates;
   const maxRounds = validateMaxRounds(raw.maxRounds);
   const driver = validateDriverId(raw.driver);
   const jobType = optionalEnum(raw, "jobType", JOB_PROFILES);
@@ -281,6 +308,32 @@ export function normalizeStartJobArgs(
   else if (expectPr === true) args.expectPr = true;
   if (interrogateReview === true) args.interrogateReview = true;
   else if (interrogateReview === false) args.interrogateReview = false;
+  if (arenaImplement === true) args.arenaImplement = true;
+  else if (arenaImplement === false) args.arenaImplement = false;
+  const arenaCandidates =
+    arenaCandidatesRaw === undefined || arenaCandidatesRaw === null
+      ? undefined
+      : validateArenaCandidates(arenaCandidatesRaw);
+  if (arenaCandidates !== undefined) args.arenaCandidates = arenaCandidates;
+  const arenaOn = arenaImplement === true;
+  const modelCount = arenaCandidates ?? BUILTIN_ARENA_CANDIDATES;
+  const arenaCandidateModels = validateArenaCandidateModels(raw.arenaCandidateModels, modelCount);
+  if (arenaCandidateModels) args.arenaCandidateModels = arenaCandidateModels;
+  if (arenaCandidateModels && arenaImplement !== true) {
+    throw new ValidationError("arenaCandidateModels requires arenaImplement");
+  }
+  if (arenaCandidates !== undefined && arenaImplement !== true && arenaImplement !== undefined) {
+    throw new ValidationError("arenaCandidates requires arenaImplement");
+  }
+  if (arenaOn && arenaCandidateModels) {
+    for (let i = 0; i < arenaCandidateModels.length; i += 1) {
+      validateStageModel(
+        arenaCandidateModels[i],
+        driverForValidation,
+        `arenaCandidateModels[${i}]`,
+      );
+    }
+  }
   return args;
 }
 
@@ -466,6 +519,15 @@ export function parseSettingsPatch(payload: Record<string, unknown>): SettingsPa
       throw new ValidationError("interrogateReview must be a boolean");
     }
     patch.interrogateReview = payload.interrogateReview;
+  }
+  if (payload.arenaImplement !== undefined) {
+    if (typeof payload.arenaImplement !== "boolean") {
+      throw new ValidationError("arenaImplement must be a boolean");
+    }
+    patch.arenaImplement = payload.arenaImplement;
+  }
+  if (payload.arenaCandidates !== undefined) {
+    patch.arenaCandidates = validateArenaCandidates(payload.arenaCandidates);
   }
   return patch;
 }

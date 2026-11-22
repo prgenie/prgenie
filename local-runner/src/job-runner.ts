@@ -85,6 +85,8 @@ import {
   resolveInterrogateVerdict,
   verifyInterrogateFindings,
 } from "./interrogate-review.js";
+import { arenaImplementEnabled } from "./arena-implement.js";
+import { runArenaBuildingStage } from "./arena-building.js";
 
 export type JobCallbacks = {
   onEvent?: (jobId: string, event: JobEvent) => void;
@@ -677,61 +679,129 @@ export async function runJobLoop(
         }
         const steer = control.drainSteer();
         const fullPrompt = steer ? `${prompt}\n\n--- steer ---\n${steer}` : prompt;
-        const baseRun = {
-          cwd: wt,
-          prompt: fullPrompt,
-          model: job.model,
-          logPath: job.logPath,
-          dryRun: job.dryRun,
-          outputFormat,
-          signal: control.signal,
-          driverId: job.driverId,
-          driverEntry,
-        };
-        const result = await runAgentStage(
-          runner,
-          config,
-          job,
-          control,
-          settings,
-          "building",
-          baseRun,
-          callbacks?.watchdogTiming,
-        );
-        if (await checkStop()) return;
-        if (!result || result.code !== 0) {
-          if (!result) {
-            await setStage(config, job, "stuck", control, callbacks);
-            await notify(
-              config,
-              job,
-              `Watchdog exhausted: ${job.input.branch}`,
-              callbacks?.fetchImpl,
-              "watchdog",
-            );
+        const arena = arenaImplementEnabled(job, settings);
+        if (arena) {
+          const buildModel = modelForActiveStage(job, "building");
+          const repoRoot = job.input.repoPath;
+          const arenaResult = await runArenaBuildingStage({
+            job,
+            settings,
+            dataDir: config.dataDir,
+            repoRoot,
+            mainWorktree: wt,
+            taskPrompt: fullPrompt,
+            outputFormat,
+            buildModel,
+            onLog: (line) => runnerLog(callbacks, job, line),
+            runCandidate: (_index, cwd, candidatePrompt, model) =>
+              runAgentStage(
+                runner,
+                config,
+                job,
+                control,
+                settings,
+                "building",
+                {
+                  cwd,
+                  prompt: candidatePrompt,
+                  model,
+                  logPath: job.logPath,
+                  dryRun: job.dryRun,
+                  outputFormat,
+                  signal: control.signal,
+                  driverId: job.driverId,
+                  driverEntry,
+                },
+                callbacks?.watchdogTiming,
+                { key: "build", model },
+              ),
+            runSynthesis: (cwd, synthesisPrompt, model) =>
+              runAgentStage(
+                runner,
+                config,
+                job,
+                control,
+                settings,
+                "building",
+                {
+                  cwd,
+                  prompt: synthesisPrompt,
+                  model,
+                  logPath: job.logPath,
+                  dryRun: job.dryRun,
+                  outputFormat,
+                  signal: control.signal,
+                  driverId: job.driverId,
+                  driverEntry,
+                },
+                callbacks?.watchdogTiming,
+                { key: "build", model },
+              ),
+          });
+          if (await checkStop()) return;
+          if (!arenaResult.ok) {
+            job.error = arenaResult.error;
+            job.postBuildPendingPr = false;
+            await setStage(config, job, "failed", control, callbacks);
             return;
           }
-          job.error = `implementor exited ${result.code}`;
-          job.postBuildPendingPr = false;
-          await setStage(config, job, "failed", control, callbacks);
-          return;
-        }
-        if (
-          !(await acceptProveEvidenceOrFail(
+        } else {
+          const baseRun = {
+            cwd: wt,
+            prompt: fullPrompt,
+            model: job.model,
+            logPath: job.logPath,
+            dryRun: job.dryRun,
+            outputFormat,
+            signal: control.signal,
+            driverId: job.driverId,
+            driverEntry,
+          };
+          const result = await runAgentStage(
+            runner,
             config,
             job,
             control,
+            settings,
             "building",
-            result.output,
-            outputFormat,
-            job.input.promptFile,
-            callbacks,
-            () => {
-              job.postBuildPendingPr = false;
-            },
-          ))
-        ) {
-          return;
+            baseRun,
+            callbacks?.watchdogTiming,
+          );
+          if (await checkStop()) return;
+          if (!result || result.code !== 0) {
+            if (!result) {
+              await setStage(config, job, "stuck", control, callbacks);
+              await notify(
+                config,
+                job,
+                `Watchdog exhausted: ${job.input.branch}`,
+                callbacks?.fetchImpl,
+                "watchdog",
+              );
+              return;
+            }
+            job.error = `implementor exited ${result.code}`;
+            job.postBuildPendingPr = false;
+            await setStage(config, job, "failed", control, callbacks);
+            return;
+          }
+          if (
+            !(await acceptProveEvidenceOrFail(
+              config,
+              job,
+              control,
+              "building",
+              result.output,
+              outputFormat,
+              job.input.promptFile,
+              callbacks,
+              () => {
+                job.postBuildPendingPr = false;
+              },
+            ))
+          ) {
+            return;
+          }
         }
         if (
           !(await runPrePushGateOrFail(config, job, control, wt, settings, callbacks, "building"))

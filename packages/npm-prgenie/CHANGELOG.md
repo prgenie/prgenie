@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Runner: optional **arena** implement fans out N parallel build candidates, synthesizes one branch with an internal rubric and graft step, verifies `PROVE: EVIDENCE`, and cleans up loser worktrees; off by default (#250).
 - Runner: optional adversarial **interrogate** review runs a second challenger model after the primary reviewer; only re-run–proven findings survive, merge by root cause, and the PR gets one combined comment with a single `VERDICT:` (#249).
 - Runner: default review prompts require blast-radius review beyond the diff, a provable safety fact (or **unproven**), and structured PR comment sections before `VERDICT:`; custom `reviewPromptFile` opts out (#248).
 - Runner: building and fixing run scoped pre-push CI (discovered or settings override) before commit/push; format failures auto-fix on touched files; `PROVE: EVIDENCE` and logs list each command, scope, and result (#255).

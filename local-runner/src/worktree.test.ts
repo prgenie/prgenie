@@ -6,11 +6,12 @@ import os from "node:os";
 import type { GhResult } from "./github.js";
 import {
   assertSafeToResetBranchAtBase,
+  ensureArenaCandidateWorktree,
   ensureContinueWorktree,
   ensureWorktree,
   parseWorktreePathForBranch,
 } from "./worktree.js";
-import { cursorWorktreeDir } from "./paths.js";
+import { arenaCandidateBranch, arenaCandidateWorktreeDir, cursorWorktreeDir } from "./paths.js";
 import { loadJob, saveJob } from "./store.js";
 import type { JobRecord, JobStage } from "./types.js";
 
@@ -409,6 +410,33 @@ describe("ensureContinueWorktree", () => {
         }),
       /git worktree remove/,
     );
+  });
+});
+
+describe("ensureArenaCandidateWorktree (#250)", () => {
+  it("uses isolated path and branch per candidate index", async () => {
+    const repoPath = "/repo/proj";
+    const jobId = "job-arena";
+    const branch = "feat/arena";
+    const wt0 = arenaCandidateWorktreeDir("proj", jobId, 0);
+    const gitImpl = async (_cwd: string, args: string[]) => {
+      if (args[0] === "worktree" && args[1] === "list") {
+        return ok("worktree /repo/proj\n");
+      }
+      if (args[0] === "fetch") return ok();
+      if (args[0] === "rev-parse" && args[1] === "--verify") return ok("a".repeat(40));
+      if (args[0] === "show-ref") return fail("");
+      if (args[0] === "worktree" && args[1] === "add") {
+        assert.equal(args[3], arenaCandidateBranch(branch, 0));
+        assert.equal(args[4], wt0);
+        return ok();
+      }
+      return ok();
+    };
+    const result = await ensureArenaCandidateWorktree(repoPath, jobId, 0, branch, undefined, {
+      gitImpl,
+    });
+    assert.equal(result.path, wt0);
   });
 });
 
