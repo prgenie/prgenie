@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.9 — 2026-11-22
 
 - Runner: optional **arena** implement fans out N parallel build candidates, synthesizes one branch with an internal rubric and graft step, verifies `PROVE: EVIDENCE`, and cleans up loser worktrees; off by default (#250).
 - Runner: optional adversarial **interrogate** review runs a second challenger model after the primary reviewer; only re-run–proven findings survive, merge by root cause, and the PR gets one combined comment with a single `VERDICT:` (#249).
@@ -8,6 +8,9 @@
 - Runner: building and fixing run scoped pre-push CI (discovered or settings override) before commit/push; format failures auto-fix on touched files; `PROVE: EVIDENCE` and logs list each command, scope, and result (#255).
 - Runner: default implement prompts require a short architect plan (`ARCHITECT: PLAN`) before code or doc work in the same building pass; custom prompt files opt out (#247).
 - Runner: default implement and fix prompts require real verification evidence (`PROVE: EVIDENCE` with command output); custom prompt files opt out (#246).
+
+- Runner: scoped CI shim is bundled into the npm package, so jobs no longer fail before push on global or npx installs (#257, #258, #261).
+- Repository links point to radiancelux/prgenie again (#245).
 
 ## 0.1.6 — 2026-11-08
 
