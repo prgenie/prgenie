@@ -427,9 +427,20 @@ export async function createJob(
     ...(args.expectPr === false ? { expectPr: false as const } : {}),
     ...(args.interrogateReview === true ? { interrogateReview: true as const } : {}),
     ...(args.interrogateReview === false ? { interrogateReview: false as const } : {}),
+    ...(args.arenaImplement === true ? { arenaImplement: true as const } : {}),
+    ...(args.arenaImplement === false ? { arenaImplement: false as const } : {}),
+    ...(args.arenaCandidates !== undefined ? { arenaCandidates: args.arenaCandidates } : {}),
+    ...(args.arenaCandidateModels?.length
+      ? { arenaCandidateModels: args.arenaCandidateModels }
+      : {}),
   };
   const interrogateReview =
     args.interrogateReview !== undefined ? args.interrogateReview : settings.interrogateReview;
+  const arenaImplement =
+    args.arenaImplement !== undefined ? args.arenaImplement : settings.arenaImplement;
+  const arenaCandidates =
+    args.arenaCandidates !== undefined ? args.arenaCandidates : settings.arenaCandidates;
+  const arenaCandidateModels = args.arenaCandidateModels;
   const logPath = jobLogFile(dataDir, id);
   await writeFile(logPath, "", "utf8");
   const job: JobRecord = {
@@ -464,6 +475,9 @@ export async function createJob(
         watchdogStageCapMs: wd.stageCapMs,
         watchdogRecoveryAttempts: wd.recoveryAttempts,
         interrogateReview,
+        arenaImplement,
+        arenaCandidates,
+        ...(arenaCandidateModels?.length ? { arenaCandidateModels } : {}),
       };
     })(),
     watchdog: {

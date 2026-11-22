@@ -73,6 +73,12 @@ export interface JobInput {
   expectPr?: boolean;
   /** Opt-in adversarial second reviewer (#249); default from runner settings when omitted. */
   interrogateReview?: boolean;
+  /** Opt-in parallel implement candidates (#250); default from runner settings when omitted. */
+  arenaImplement?: boolean;
+  /** Number of parallel arena candidates when arena is on (#250). */
+  arenaCandidates?: number;
+  /** Per-candidate model overrides for arena fan-out (#250). */
+  arenaCandidateModels?: string[];
 }
 
 export interface TokenUsage {
@@ -174,6 +180,10 @@ export type JobEffectiveSnapshot = {
   watchdogRecoveryAttempts: number;
   /** Snapshotted at job creation when interrogate review is enabled (#249). */
   interrogateReview?: boolean;
+  /** Snapshotted at job creation when arena implement is enabled (#250). */
+  arenaImplement?: boolean;
+  arenaCandidates?: number;
+  arenaCandidateModels?: string[];
 };
 
 export interface JobRecord {
@@ -287,6 +297,10 @@ export interface StartJobArgs {
   expectPr?: boolean;
   /** Enable adversarial challenger pass after the primary reviewer (#249). */
   interrogateReview?: boolean;
+  /** Run N parallel implement candidates, then synthesize one branch (#250). */
+  arenaImplement?: boolean;
+  arenaCandidates?: number;
+  arenaCandidateModels?: string[];
 }
 
 export type JobEvent =

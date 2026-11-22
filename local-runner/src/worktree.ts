@@ -1,6 +1,12 @@
 import { appendFile, mkdir, rm, access } from "node:fs/promises";
 import path from "node:path";
-import { cursorWorktreeDir, managedWorktreesRoot, repoSlugFromPath } from "./paths.js";
+import {
+  arenaCandidateBranch,
+  arenaCandidateWorktreeDir,
+  cursorWorktreeDir,
+  managedWorktreesRoot,
+  repoSlugFromPath,
+} from "./paths.js";
 import { git, type GhResult } from "./github.js";
 import { baseRefProbeOrder, resolveWorktreeBaseRef, type GitFn } from "./repo-base.js";
 import type { RunnerSettings } from "./settings.js";
@@ -362,6 +368,88 @@ export async function ensureWorktree(
     lastErr = add.stderr.trim() || add.stdout.trim();
   }
   throw new Error(await enrichWorktreeAddFailure(repoPath, branch, lastErr, opts?.dataDir));
+}
+
+/** One isolated checkout per arena implement candidate (#250). */
+export async function ensureArenaCandidateWorktree(
+  repoPath: string,
+  jobId: string,
+  candidateIndex: number,
+  jobBranch: string,
+  settings?: RunnerSettings,
+  opts?: WorktreeOpts,
+): Promise<WorktreeEnsureResult> {
+  const branch = arenaCandidateBranch(jobBranch, candidateIndex);
+  const slug = repoSlugFromPath(repoPath);
+  const wt = arenaCandidateWorktreeDir(slug, jobId, candidateIndex);
+  const syntheticJobId = `${jobId}-arena-${candidateIndex}`;
+  await mkdir(path.dirname(wt), { recursive: true });
+  const gitImpl = opts?.gitImpl ?? git;
+  const exists = await gitImpl(repoPath, ["worktree", "list", "--porcelain"]);
+  const listed = exists.stdout.split("\n").some((line) => {
+    if (!line.startsWith("worktree ")) return false;
+    const p = line.slice("worktree ".length).trim();
+    return worktreePathsEqual(p, wt);
+  });
+  let onDisk = false;
+  try {
+    await access(wt);
+    onDisk = true;
+  } catch {
+    onDisk = false;
+  }
+  if (listed && onDisk) {
+    const bases = settings ? baseRefProbeOrder(settings) : ["origin/main", "origin/master", "main"];
+    for (const base of bases) {
+      const tip = await resolveBaseTip(repoPath, base, gitImpl);
+      if (tip) return { path: wt, ...tip };
+    }
+    return { path: wt, baseRef: "origin/main", baseSha: "" };
+  }
+  if (listed && !onDisk) {
+    await gitImpl(repoPath, ["worktree", "remove", "--force", wt]).catch(() => undefined);
+    await rm(wt, { recursive: true, force: true }).catch(() => undefined);
+  }
+  await bestEffortFetchOrigin(repoPath, gitImpl);
+  await releaseCleanPushedTerminalWorktree(repoPath, branch, wt, syntheticJobId, opts);
+  const bases = settings ? baseRefProbeOrder(settings) : ["origin/main", "origin/master", "main"];
+  let lastErr = "";
+  for (const base of bases) {
+    const probe = await gitImpl(repoPath, ["rev-parse", "--verify", base]);
+    if (probe.code !== 0) continue;
+    await assertSafeToResetBranchAtBase(repoPath, branch, base, gitImpl);
+    const add = await gitImpl(repoPath, ["worktree", "add", "-B", branch, wt, base]);
+    if (add.code === 0) {
+      const tip = await resolveBaseTip(repoPath, base, gitImpl);
+      return { path: wt, ...(tip ?? { baseRef: base, baseSha: probe.stdout.trim() }) };
+    }
+    lastErr = add.stderr.trim() || add.stdout.trim();
+  }
+  if (settings) {
+    const resolved = await resolveWorktreeBaseRef(repoPath, settings, gitImpl);
+    await assertSafeToResetBranchAtBase(repoPath, branch, resolved.ref, gitImpl);
+    const add = await gitImpl(repoPath, ["worktree", "add", "-B", branch, wt, resolved.ref]);
+    if (add.code === 0) {
+      const tip = await resolveBaseTip(repoPath, resolved.ref, gitImpl);
+      if (tip) return { path: wt, ...tip };
+      return { path: wt, baseRef: resolved.ref, baseSha: "" };
+    }
+    lastErr = add.stderr.trim() || add.stdout.trim();
+  }
+  throw new Error(await enrichWorktreeAddFailure(repoPath, branch, lastErr, opts?.dataDir));
+}
+
+export async function removeArenaCandidateWorktree(
+  repoPath: string,
+  worktreePath: string,
+  branch: string,
+  opts?: { gitImpl?: GitFn },
+): Promise<void> {
+  await removeWorktree(repoPath, worktreePath, {
+    branch,
+    deleteBranch: true,
+    gitImpl: opts?.gitImpl,
+  });
 }
 
 /** Reuse an existing job worktree when present; otherwise add one at `origin/<branch>`. */

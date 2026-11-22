@@ -4,12 +4,15 @@ import path from "node:path";
 import type { RunnerConfig } from "./config.js";
 import { notifySettingsFile, runnerSettingsFile } from "./paths.js";
 import {
+  BUILTIN_ARENA_CANDIDATES,
   BUILTIN_DEFAULT_MAX_ROUNDS,
   BUILTIN_CHALLENGER_MODEL,
   BUILTIN_FIX_MODEL,
   BUILTIN_REREVIEW_MODEL,
   DEFAULT_WATCHDOG,
   MAX_ACTIVE_JOBS_DEFAULT,
+  ARENA_CANDIDATES_MAX,
+  ARENA_CANDIDATES_MIN,
   MAX_ACTIVE_JOBS_MAX,
   MAX_ACTIVE_JOBS_MIN,
   MAX_ROUNDS_MAX,
@@ -19,6 +22,7 @@ import {
 } from "./runner-policy.js";
 import { normalizeStageModels } from "./job-models.js";
 import {
+  validateArenaCandidates,
   validateDefaultMaxRounds,
   validateMaxActiveJobs,
   validateWatchdogPatch,
@@ -89,6 +93,13 @@ export type RunnerSettings = {
    * Costs an extra review pass; off by default.
    */
   interrogateReview: boolean;
+  /**
+   * When true, fan out N parallel implement candidates then synthesize one branch (#250).
+   * Multiplies build-stage cost; off by default.
+   */
+  arenaImplement: boolean;
+  /** Default N when arena is on (#250). */
+  arenaCandidates: number;
 };
 
 export type DriverEntryPublic = Omit<DriverEntry, "apiKey"> & {
@@ -173,6 +184,8 @@ const DEFAULT: RunnerSettings = {
   jobTypes: {},
   presets: {},
   interrogateReview: false,
+  arenaImplement: false,
+  arenaCandidates: BUILTIN_ARENA_CANDIDATES,
 };
 
 function parseNotifyEvents(raw: Partial<NotifyEventSettings> | undefined): NotifyEventSettings {
@@ -301,6 +314,13 @@ function parseSettings(raw: Partial<RunnerSettings>): RunnerSettings {
         ? { ...(raw.presets as Record<string, unknown>) }
         : {},
     interrogateReview: Boolean(raw.interrogateReview),
+    arenaImplement: Boolean(raw.arenaImplement),
+    arenaCandidates: parseBoundedInt(
+      raw.arenaCandidates,
+      BUILTIN_ARENA_CANDIDATES,
+      ARENA_CANDIDATES_MIN,
+      ARENA_CANDIDATES_MAX,
+    ),
   };
 }
 
@@ -363,6 +383,8 @@ export type SettingsPatch = {
   jobTypes?: Record<string, unknown>;
   presets?: Record<string, unknown>;
   interrogateReview?: boolean;
+  arenaImplement?: boolean;
+  arenaCandidates?: number;
 };
 
 export class SettingsConflictError extends Error {
@@ -459,6 +481,12 @@ export async function saveSettings(dataDir: string, patch: SettingsPatch): Promi
       patch.interrogateReview !== undefined
         ? Boolean(patch.interrogateReview)
         : current.interrogateReview,
+    arenaImplement:
+      patch.arenaImplement !== undefined ? Boolean(patch.arenaImplement) : current.arenaImplement,
+    arenaCandidates:
+      patch.arenaCandidates !== undefined
+        ? validateArenaCandidates(patch.arenaCandidates)
+        : current.arenaCandidates,
   });
   await atomicWriteJson(runnerSettingsFile(dataDir), next);
   return next;

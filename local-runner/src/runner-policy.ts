@@ -30,6 +30,11 @@ export const BUILTIN_REREVIEW_MODEL = "auto";
 /** Optional adversarial challenger review (#249); prefers a model different from the first reviewer. */
 export const BUILTIN_CHALLENGER_MODEL = "auto";
 
+/** Parallel implement candidates when arena mode is on (#250). */
+export const BUILTIN_ARENA_CANDIDATES = 2;
+export const ARENA_CANDIDATES_MIN = 2;
+export const ARENA_CANDIDATES_MAX = 4;
+
 export type WatchdogPolicy = {
   inactivityMs: number;
   stageCapMs: number;

@@ -35,6 +35,15 @@ describe("runner settings", () => {
     assert.equal(s.stageModels.rereview, "auto");
     assert.equal(s.stageModels.challenger, "auto");
     assert.equal(s.interrogateReview, false);
+    assert.equal(s.arenaImplement, false);
+    assert.equal(s.arenaCandidates, 2);
+  });
+
+  it("persists arenaImplement and arenaCandidates", async () => {
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), "lr-set-arena-"));
+    const saved = await saveSettings(dataDir, { arenaImplement: true, arenaCandidates: 3 });
+    assert.equal(saved.arenaImplement, true);
+    assert.equal(saved.arenaCandidates, 3);
   });
 
   it("persists interrogateReview and challenger stage model", async () => {
