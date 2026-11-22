@@ -2,6 +2,10 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { parseVerdictFromText } from "./github.js";
 import {
+  buildCombinedInterrogateComment,
+  resolveInterrogateVerdict,
+} from "./interrogate-review.js";
+import {
   localVerdictCommentBody,
   parseLocalReviewVerdict,
   resolveReviewVerdict,
@@ -176,6 +180,37 @@ describe("resolveReviewVerdict", () => {
     });
     assert.equal(res, null);
     assert.equal(mirrored, 0);
+  });
+});
+
+describe("interrogate verdict contract (#249)", () => {
+  it("combined comment has exactly one VERDICT line", () => {
+    const body = buildCombinedInterrogateComment({
+      primaryText: "Review.\nVERDICT: APPROVE",
+      verified: [],
+      dropped: { selfReportedCount: 0, runnerDroppedCount: 0, runnerDropReason: "none" },
+      verdict: "APPROVE",
+    });
+    assert.equal((body.match(/^VERDICT: /gm) ?? []).length, 1);
+    assert.equal(parseVerdictFromText(body), "APPROVE");
+  });
+
+  it("verified findings upgrade APPROVE to CHANGES", () => {
+    assert.equal(
+      resolveInterrogateVerdict("APPROVE", [
+        {
+          title: "bug",
+          command: "true",
+          reportedOutput: "FAIL",
+          requiredOutput: "",
+          source: "challenger",
+          verifyOutput: "FAIL",
+          verifyExitCode: 1,
+          verified: true,
+        },
+      ]),
+      "CHANGES",
+    );
   });
 });
 

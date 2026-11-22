@@ -5,6 +5,7 @@ import type { RunnerConfig } from "./config.js";
 import { notifySettingsFile, runnerSettingsFile } from "./paths.js";
 import {
   BUILTIN_DEFAULT_MAX_ROUNDS,
+  BUILTIN_CHALLENGER_MODEL,
   BUILTIN_FIX_MODEL,
   BUILTIN_REREVIEW_MODEL,
   DEFAULT_WATCHDOG,
@@ -43,6 +44,8 @@ export type StageModelDefaults = {
   /** Review round 2+. `auto` on drivers that support it; otherwise the review model. */
   rereview: string | null;
   fix: string | null;
+  /** Adversarial challenger review model (#249); defaults differ from `review` when possible. */
+  challenger: string | null;
 };
 
 export type NotifyEventSettings = {
@@ -81,6 +84,11 @@ export type RunnerSettings = {
   /** Reserved for docs presets — opaque bag. */
   jobTypes: Record<string, unknown>;
   presets: Record<string, unknown>;
+  /**
+   * When true, run a second challenger model after the primary reviewer (#249).
+   * Costs an extra review pass; off by default.
+   */
+  interrogateReview: boolean;
 };
 
 export type DriverEntryPublic = Omit<DriverEntry, "apiKey"> & {
@@ -143,6 +151,7 @@ const DEFAULT_STAGE_MODELS: StageModelDefaults = {
   review: null,
   rereview: BUILTIN_REREVIEW_MODEL,
   fix: BUILTIN_FIX_MODEL,
+  challenger: BUILTIN_CHALLENGER_MODEL,
 };
 
 const DEFAULT: RunnerSettings = {
@@ -163,6 +172,7 @@ const DEFAULT: RunnerSettings = {
   drivers: DEFAULT_DRIVERS,
   jobTypes: {},
   presets: {},
+  interrogateReview: false,
 };
 
 function parseNotifyEvents(raw: Partial<NotifyEventSettings> | undefined): NotifyEventSettings {
@@ -218,6 +228,7 @@ function parseStageModels(raw: Partial<RunnerSettings>): StageModelDefaults {
   const stage = normalizeStageModels(raw.stageModels);
   if (raw.stageModels?.fix === undefined) stage.fix = DEFAULT_STAGE_MODELS.fix;
   if (raw.stageModels?.rereview === undefined) stage.rereview = DEFAULT_STAGE_MODELS.rereview;
+  if (raw.stageModels?.challenger === undefined) stage.challenger = DEFAULT_STAGE_MODELS.challenger;
   return stage;
 }
 
@@ -289,6 +300,7 @@ function parseSettings(raw: Partial<RunnerSettings>): RunnerSettings {
       raw.presets && typeof raw.presets === "object" && !Array.isArray(raw.presets)
         ? { ...(raw.presets as Record<string, unknown>) }
         : {},
+    interrogateReview: Boolean(raw.interrogateReview),
   };
 }
 
@@ -350,6 +362,7 @@ export type SettingsPatch = {
   drivers?: DriverEntry[];
   jobTypes?: Record<string, unknown>;
   presets?: Record<string, unknown>;
+  interrogateReview?: boolean;
 };
 
 export class SettingsConflictError extends Error {
@@ -369,6 +382,7 @@ function mergeStageModels(
     review: patch.review !== undefined ? patch.review : current.review,
     rereview: patch.rereview !== undefined ? patch.rereview : current.rereview,
     fix: patch.fix !== undefined ? patch.fix : current.fix,
+    challenger: patch.challenger !== undefined ? patch.challenger : current.challenger,
   });
 }
 
@@ -441,6 +455,10 @@ export async function saveSettings(dataDir: string, patch: SettingsPatch): Promi
         : current.jobTypes,
     presets:
       patch.presets !== undefined ? { ...current.presets, ...patch.presets } : current.presets,
+    interrogateReview:
+      patch.interrogateReview !== undefined
+        ? Boolean(patch.interrogateReview)
+        : current.interrogateReview,
   });
   await atomicWriteJson(runnerSettingsFile(dataDir), next);
   return next;

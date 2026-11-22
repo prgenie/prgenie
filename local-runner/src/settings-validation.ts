@@ -39,6 +39,7 @@ const STAGE_MODEL_KEYS: readonly (keyof StageModelDefaults)[] = [
   "review",
   "rereview",
   "fix",
+  "challenger",
 ];
 const NOTIFY_EVENT_KEYS: readonly (keyof NotifyEventSettings)[] = [
   "onFailed",
@@ -214,6 +215,7 @@ export function normalizeStartJobArgs(
   const title = optionalString(raw, "title");
   const dryRun = optionalBoolean(raw, "dryRun");
   const expectPr = optionalBoolean(raw, "expectPr");
+  const interrogateReview = optionalBoolean(raw, "interrogateReview");
   const maxRounds = validateMaxRounds(raw.maxRounds);
   const driver = validateDriverId(raw.driver);
   const jobType = optionalEnum(raw, "jobType", JOB_PROFILES);
@@ -232,6 +234,7 @@ export function normalizeStartJobArgs(
       review: validateStageModel(sm.review, driverForValidation, "review"),
       rereview: validateStageModel(sm.rereview, driverForValidation, "rereview"),
       fix: validateStageModel(sm.fix, driverForValidation, "fix"),
+      challenger: validateStageModel(sm.challenger, driverForValidation, "challenger"),
     };
   }
 
@@ -276,6 +279,8 @@ export function normalizeStartJobArgs(
   if (watchdog) args.watchdog = watchdog;
   if (expectPr === false) args.expectPr = false;
   else if (expectPr === true) args.expectPr = true;
+  if (interrogateReview === true) args.interrogateReview = true;
+  else if (interrogateReview === false) args.interrogateReview = false;
   return args;
 }
 
@@ -455,6 +460,12 @@ export function parseSettingsPatch(payload: Record<string, unknown>): SettingsPa
   }
   if (payload.presets !== undefined && typeof payload.presets === "object") {
     patch.presets = payload.presets as Record<string, unknown>;
+  }
+  if (payload.interrogateReview !== undefined) {
+    if (typeof payload.interrogateReview !== "boolean") {
+      throw new ValidationError("interrogateReview must be a boolean");
+    }
+    patch.interrogateReview = payload.interrogateReview;
   }
   return patch;
 }

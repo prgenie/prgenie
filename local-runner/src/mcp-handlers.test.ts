@@ -54,7 +54,9 @@ describe("start_job MCP schema", () => {
       "review",
       "rereview",
       "fix",
+      "challenger",
     ]);
+    assert.equal(props.interrogateReview?.type, "boolean");
   });
 
   it("uses operator-neutral ticket field descriptions", () => {

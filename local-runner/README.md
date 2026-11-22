@@ -83,7 +83,7 @@ On startup the runner prints reachable URLs (loopback plus a best-effort LAN IP 
 
 ### MCP tools
 
-- `start_job` — `repoPath` or `remote`, `branch`, `promptFile` (code jobs), optional **`jobType`** / **`profile`** (`docs` | code), optional **`docsTemplate`** (`marketing` | `policy` | `research`), optional **`expectPr`** (`false` → finish approved when build succeeds with no PR), optional `reviewPromptFile`, `fixPromptFile`, `maxRounds`, `model` (every stage), optional **`stageModels`** (`{ build, review, rereview, fix }`), optional **`driver`** (id), `dryRun`, optional `ticketUrl` / `linearIssue` (when omitted, the runner parses `issue-<n>` from the branch name), optional `ticketUrls` (every ticket the job covers; http(s), at most 10)
+- `start_job` — `repoPath` or `remote`, `branch`, `promptFile` (code jobs), optional **`jobType`** / **`profile`** (`docs` | code), optional **`docsTemplate`** (`marketing` | `policy` | `research`), optional **`expectPr`** (`false` → finish approved when build succeeds with no PR), optional `reviewPromptFile`, `fixPromptFile`, `maxRounds`, `model` (every stage), optional **`stageModels`** (`{ build, review, rereview, fix, challenger }`), optional **`interrogateReview`** (second adversarial challenger pass after the primary reviewer — **off by default**; adds another full review model call per round), optional **`driver`** (id), `dryRun`, optional `ticketUrl` / `linearIssue` (when omitted, the runner parses `issue-<n>` from the branch name), optional `ticketUrls` (every ticket the job covers; http(s), at most 10)
 - `list_jobs` — optional `includeArchived` (archived jobs carry `archivedAt`)
 - `get_job` — status + log tail (also resolves archived jobs, read-only)
 - `steer_job` — queue follow-up text for the next agent step
@@ -100,6 +100,8 @@ On startup the runner prints reachable URLs (loopback plus a best-effort LAN IP 
 `building` → `reviewing` (round N) → `fixing` → … → `approved` | `changes_remaining` | `stuck` | `failed` | `stopped` | `interrupted` (worker died; see [Restart and upgrade](#restart-and-upgrade-while-jobs-run))
 
 Default **`maxRounds`** = 3 (review/fix cycles). N review rounds allow at most N−1 intervening fix passes. Reviewer must post **one** GitHub issue comment on the PR ending with `VERDICT: APPROVE` or `VERDICT: CHANGES` (built-in default review prompt enforces this). The runner also accepts the same `VERDICT:` line on PR review bodies as a fallback. If neither has a verdict for the round (for example, a custom `reviewPromptFile` that asks for a verdict line but not a PR comment), the runner reads the `VERDICT:` line from the reviewer's final message instead, posts that message to the PR as a comment so the fixer and humans can see it, and notes this in the job log. A posted GitHub verdict always wins over the local one. The job fails only when no verdict is found anywhere.
+
+With **`interrogateReview`** enabled (runner settings and/or per job), the primary reviewer returns the review locally, a **challenger** model tries to break the change, the runner re-runs each reported command and drops unproven findings, then posts **one** combined PR comment ending with a single `VERDICT:` line. Verified challenger findings send the loop to `CHANGES` like a primary `CHANGES` verdict; no verified findings is a valid `APPROVE` when the primary review also approved. Expect roughly **2× review-stage model time and cost** when interrogate is on.
 
 ### Docs mode
 
