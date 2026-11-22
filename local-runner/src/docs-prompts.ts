@@ -1,5 +1,6 @@
 import type { DocsTemplateId } from "./docs-settings.js";
 import { DOCS_ARCHITECT_OUTLINE_SECTION } from "./architect-plan.js";
+import { DOCS_REVIEW_BLAST_RADIUS_SECTION } from "./blast-radius-review.js";
 import { DOCS_PROVE_IT_WORKS_SECTION } from "./prove-it-works.js";
 import { DEFAULT_FIX_PROMPT_BODY, DEFAULT_REVIEW_PROMPT } from "./prompts.js";
 
@@ -40,6 +41,8 @@ ${DOCS_PATH_HINT}
 ${DOCS_PROVE_IT_WORKS_SECTION}`;
 
 export const DOCS_REVIEW_PROMPT = `You are the reviewer for a **documentation** pull request (Markdown only).
+
+${DOCS_REVIEW_BLAST_RADIUS_SECTION}
 
 Check: accuracy vs cited sources, tone fit for the audience, sources cited where claims need them, no fabricated facts, sensible structure, and the PR only touches intended doc paths (docs/, policies/, marketing/, or existing doc layout).
 

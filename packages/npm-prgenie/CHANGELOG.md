@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Runner: default review prompts require blast-radius review beyond the diff, a provable safety fact (or **unproven**), and structured PR comment sections before `VERDICT:`; custom `reviewPromptFile` opts out (#248).
 - Runner: building and fixing run scoped pre-push CI (discovered or settings override) before commit/push; format failures auto-fix on touched files; `PROVE: EVIDENCE` and logs list each command, scope, and result (#255).
 - Runner: default implement prompts require a short architect plan (`ARCHITECT: PLAN`) before code or doc work in the same building pass; custom prompt files opt out (#247).
 - Runner: default implement and fix prompts require real verification evidence (`PROVE: EVIDENCE` with command output); custom prompt files opt out (#246).
