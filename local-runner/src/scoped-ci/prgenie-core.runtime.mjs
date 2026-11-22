@@ -1,21 +1,15 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const coreRoot = path.join(here, "../../../packages/core/src");
-
-let selectFn = null;
-
-async function loadSelectCiChecks() {
-  if (selectFn) return selectFn;
-  const mod = await import(pathToFileURL(path.join(coreRoot, "ci-select.ts")).href);
-  selectFn = mod.selectCiChecks;
-  return selectFn;
-}
+// Static imports so scripts/build.mjs can bundle core into
+// local-runner/dist/prgenie-core.runtime.mjs. A runtime path to packages/core
+// broke once the shim was copied to dist/ (one level shallower), and plain node
+// cannot load core's .ts sources (their imports use .js specifiers) anyway.
+import { selectCiChecks } from "../../../packages/core/src/ci-select.ts";
+import { runCiChecks, resolveFormatCheckFiles } from "../../../packages/core/src/ci-runner.ts";
+import { ciCheckCommand } from "../../../packages/core/src/progress.ts";
 
 export async function prgenieCiSelection(cwd, changedPaths) {
-  const selectCiChecks = await loadSelectCiChecks();
   return selectCiChecks(changedPaths, {
     cwd,
     exists: (rel) => existsSync(path.join(cwd, rel)),
@@ -23,8 +17,6 @@ export async function prgenieCiSelection(cwd, changedPaths) {
 }
 
 export async function runPrgenieCiChecks(cwd, selection, onProgress) {
-  const { runCiChecks } = await import(pathToFileURL(path.join(coreRoot, "ci-runner.ts")).href);
-  const { ciCheckCommand } = await import(pathToFileURL(path.join(coreRoot, "progress.ts")).href);
   const runner = await runCiChecks(cwd, {
     checks: selection.checks,
     selection,
@@ -45,9 +37,6 @@ export async function runPrgenieCiChecks(cwd, selection, onProgress) {
 }
 
 export async function resolvePrgenieFormatFiles(cwd, changedPaths) {
-  const { resolveFormatCheckFiles } = await import(
-    pathToFileURL(path.join(coreRoot, "ci-runner.ts")).href
-  );
   const { files } = await resolveFormatCheckFiles(cwd, {
     changedPaths,
     formatScoped: true,

@@ -8,6 +8,7 @@ packages/plugin/mcp/*.cjs
 packages/extension/dist
 packages/npm-prgenie/runner.cjs
 packages/npm-prgenie/markdownlint-prose-defaults.jsonc
+packages/npm-prgenie/prgenie-core.runtime.mjs
 local-runner/dist
 _security-scan
 .cursor
