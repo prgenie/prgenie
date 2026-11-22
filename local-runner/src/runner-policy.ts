@@ -27,6 +27,8 @@ export const JOB_ERROR_MAX_LEN = 2_000;
 export const BUILTIN_FIX_MODEL = "auto";
 /** Review rounds after the first. Drivers without `auto` fall back to the review model. */
 export const BUILTIN_REREVIEW_MODEL = "auto";
+/** Optional adversarial challenger review (#249); prefers a model different from the first reviewer. */
+export const BUILTIN_CHALLENGER_MODEL = "auto";
 
 export type WatchdogPolicy = {
   inactivityMs: number;

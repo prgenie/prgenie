@@ -1,6 +1,10 @@
 import type { RunnerConfig } from "./config.js";
 import type { JobInput, JobRecord } from "./types.js";
-import { BUILTIN_FIX_MODEL, BUILTIN_REREVIEW_MODEL } from "./runner-policy.js";
+import {
+  BUILTIN_CHALLENGER_MODEL,
+  BUILTIN_FIX_MODEL,
+  BUILTIN_REREVIEW_MODEL,
+} from "./runner-policy.js";
 import type { RunnerSettings, StageModelDefaults } from "./settings.js";
 import { ValidationError } from "./validation-error.js";
 
@@ -9,6 +13,7 @@ export type ResolvedStageModels = {
   review: string;
   rereview: string;
   fix: string;
+  challenger: string;
 };
 
 export type ModelSource = "job" | "preset" | "settings" | "env" | "builtin";
@@ -32,6 +37,8 @@ export function normalizeStageModels(
     review: typeof raw?.review === "string" && raw.review.trim() ? raw.review.trim() : null,
     rereview: typeof raw?.rereview === "string" && raw.rereview.trim() ? raw.rereview.trim() : null,
     fix: typeof raw?.fix === "string" && raw.fix.trim() ? raw.fix.trim() : null,
+    challenger:
+      typeof raw?.challenger === "string" && raw.challenger.trim() ? raw.challenger.trim() : null,
   };
 }
 
@@ -47,12 +54,23 @@ function firstModel(candidates: ModelCandidate[], fallback: ResolvedModel): Reso
   return fallback;
 }
 
+function challengerFallback(
+  review: ResolvedModel,
+  rereview: ResolvedModel,
+  supportsAuto: boolean,
+): ResolvedModel {
+  if (rereview.value !== review.value) return rereview;
+  if (supportsAuto) return { value: BUILTIN_CHALLENGER_MODEL, source: "builtin" };
+  return rereview;
+}
+
 /**
  * Resolve per-stage models at job creation. Each stage takes the first value set, in order:
  * request `stageModels[stage]`, request `model` (legacy, every stage), settings
  * `stageModels[stage]`, the stage default (build: settings `defaultModel`; review: the settings
  * build model; re-review: `auto` on drivers that support it, else the review model; fix: `auto`
- * on drivers that support it, else the build model), then the env model.
+ * on drivers that support it, else the build model; challenger: `auto` when supported, else
+ * re-review when it differs from review), then the env model.
  */
 export function resolveStageModelsForJob(
   config: RunnerConfig,
@@ -100,12 +118,25 @@ export function resolveStageModelsForJob(
     ],
     build,
   );
+  const settingsChallenger = defaults.challenger?.trim();
+  let challenger = firstModel(
+    [
+      [requested?.challenger, "job"],
+      [settingsChallenger === "auto" && !supportsAuto ? null : settingsChallenger, "settings"],
+      [supportsAuto ? BUILTIN_CHALLENGER_MODEL : null, "builtin"],
+    ],
+    challengerFallback(review, rereview, supportsAuto),
+  );
+  if (challenger.value === review.value && rereview.value !== review.value) {
+    challenger = { ...rereview };
+  }
 
   for (const [stage, model] of [
     ["fix", fix.value],
     ["build", build.value],
     ["review", review.value],
     ["rereview", rereview.value],
+    ["challenger", challenger.value],
   ] as const) {
     if (model === "auto" && !supportsAuto) {
       throw new ValidationError(
@@ -119,11 +150,13 @@ export function resolveStageModelsForJob(
     review: review.value,
     rereview: rereview.value,
     fix: fix.value,
+    challenger: challenger.value,
     sources: {
       build: build.source,
       review: review.source,
       rereview: rereview.source,
       fix: fix.source,
+      challenger: challenger.source,
     },
   };
 }
@@ -132,7 +165,7 @@ export function resolveStageModelsForJob(
 export function stageModelKeyForRun(
   stage: "building" | "reviewing" | "fixing",
   reviewRound: number,
-): keyof ResolvedStageModels {
+): keyof Pick<ResolvedStageModels, "build" | "review" | "rereview" | "fix"> {
   if (stage === "building") return "build";
   if (stage === "fixing") return "fix";
   return reviewRound >= 2 ? "rereview" : "review";
@@ -149,6 +182,12 @@ export function modelForActiveStage(
   if (actual) return actual;
   if (key === "rereview") return models.rereview || models.review;
   return models[key];
+}
+
+export function challengerModelForJob(job: JobRecord): string {
+  const models = job.stageModels;
+  if (!models) return job.model;
+  return job.stageModelActual?.challenger ?? models.challenger ?? models.rereview ?? models.review;
 }
 
 export function recordActualModel(

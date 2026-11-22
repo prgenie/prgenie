@@ -21,9 +21,15 @@ export type JobWorkerState = {
 
 export type JobProfile = "code" | "docs" | "compute";
 
-export type JobStageModelKey = "build" | "review" | "rereview" | "fix";
+export type JobStageModelKey = "build" | "review" | "rereview" | "fix" | "challenger";
 
-export type JobStageModels = Record<JobStageModelKey, string>;
+export type JobStageModels = {
+  build: string;
+  review: string;
+  rereview: string;
+  fix: string;
+  challenger?: string;
+};
 
 export type JobStageModelsInput = Partial<JobStageModels>;
 
@@ -65,6 +71,8 @@ export interface JobInput {
    * Default true: missing PR after build becomes stuck.
    */
   expectPr?: boolean;
+  /** Opt-in adversarial second reviewer (#249); default from runner settings when omitted. */
+  interrogateReview?: boolean;
 }
 
 export interface TokenUsage {
@@ -164,6 +172,8 @@ export type JobEffectiveSnapshot = {
   watchdogInactivityMs: number;
   watchdogStageCapMs: number;
   watchdogRecoveryAttempts: number;
+  /** Snapshotted at job creation when interrogate review is enabled (#249). */
+  interrogateReview?: boolean;
 };
 
 export interface JobRecord {
@@ -275,6 +285,8 @@ export interface StartJobArgs {
   title?: string;
   /** See {@link JobInput.expectPr}. */
   expectPr?: boolean;
+  /** Enable adversarial challenger pass after the primary reviewer (#249). */
+  interrogateReview?: boolean;
 }
 
 export type JobEvent =

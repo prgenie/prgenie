@@ -815,17 +815,35 @@ describe("start job validation parity (HTTP POST /api/jobs vs MCP start_job)", (
         [
           "explicit fix beats legacy model",
           { model: "composer-2.5", stageModels: { review: "review-x", fix: "auto" } },
-          { build: "composer-2.5", review: "review-x", rereview: "composer-2.5", fix: "auto" },
+          {
+            build: "composer-2.5",
+            review: "review-x",
+            rereview: "composer-2.5",
+            fix: "auto",
+            challenger: "auto",
+          },
         ],
         [
           "no fix model given",
           {},
-          { build: "composer-2.5", review: "composer-2.5", rereview: "auto", fix: "auto" },
+          {
+            build: "composer-2.5",
+            review: "composer-2.5",
+            rereview: "auto",
+            fix: "auto",
+            challenger: "auto",
+          },
         ],
         [
           "explicit non-auto fix",
           { stageModels: { fix: "fix-x" } },
-          { build: "composer-2.5", review: "composer-2.5", rereview: "auto", fix: "fix-x" },
+          {
+            build: "composer-2.5",
+            review: "composer-2.5",
+            rereview: "auto",
+            fix: "fix-x",
+            challenger: "auto",
+          },
         ],
       ];
       for (const [i, [label, extra, expected]] of requests.entries()) {

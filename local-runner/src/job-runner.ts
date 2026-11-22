@@ -10,7 +10,7 @@ import {
   postPrComment,
   type Verdict,
 } from "./github.js";
-import { resolveReviewVerdict } from "./review-verdict.js";
+import { resolveReviewVerdict, reviewerFinalText } from "./review-verdict.js";
 import { JobControl } from "./job-control.js";
 import {
   DEFAULT_FIX_PROMPT,
@@ -49,7 +49,13 @@ import { adoptRaisedWatchdog } from "./watchdog-extend.js";
 import { isComputeJob } from "./job-type-watchdog.js";
 import { createProcessActivitySampler } from "./watchdog-process-activity.js";
 import { trackShellToolLine, type ShellToolTracker } from "./stream-json-log.js";
-import { modelForActiveStage, recordActualModel, stageModelKeyForRun } from "./job-models.js";
+import {
+  challengerModelForJob,
+  modelForActiveStage,
+  recordActualModel,
+  stageModelKeyForRun,
+  type ResolvedStageModels,
+} from "./job-models.js";
 import { setJobError } from "./job-error.js";
 import { parseWatchdogPolicy } from "./runner-policy.js";
 import {
@@ -67,6 +73,18 @@ import { readStagePromptFile, type PromptFileBases } from "./prompt-file.js";
 import { reviewRoundSupplement } from "./blast-radius-review.js";
 import { hasProveEvidence, proveEvidenceGateApplies } from "./prove-it-works.js";
 import { runPrePushCiGate } from "./pre-push-ci-gate.js";
+import {
+  buildCombinedInterrogateComment,
+  challengerDroppedSelfReport,
+  CODE_INTERROGATE_CHALLENGER_SECTION,
+  DOCS_INTERROGATE_CHALLENGER_SECTION,
+  INTERROGATE_PRIMARY_REVIEW_SUPPLEMENT,
+  interrogateReviewEnabled,
+  parseInterrogateFindings,
+  parsePrimaryReviewVerdict,
+  resolveInterrogateVerdict,
+  verifyInterrogateFindings,
+} from "./interrogate-review.js";
 
 export type JobCallbacks = {
   onEvent?: (jobId: string, event: JobEvent) => void;
@@ -195,6 +213,7 @@ async function runAgentStage(
   stage: "building" | "reviewing" | "fixing",
   opts: Parameters<AgentRunner["run"]>[0],
   timing?: WatchdogTiming,
+  runModel?: { key?: keyof ResolvedStageModels; model?: string },
 ): Promise<{ code: number; output: string } | null> {
   const policy = () => watchdogPolicyForJob(job, settings);
   job.watchdog = job.watchdog ?? {
@@ -232,8 +251,9 @@ async function runAgentStage(
       job.runtime = { waitMode: "agent" };
     }
   };
-  const model = modelForActiveStage(job, stage);
-  recordActualModel(job, stageModelKeyForRun(stage, job.reviewRound), model);
+  const modelKey = runModel?.key ?? stageModelKeyForRun(stage, job.reviewRound);
+  const model = runModel?.model ?? modelForActiveStage(job, stage);
+  recordActualModel(job, modelKey, model);
   // The serve-side supervisor budgets detached workers per stage from the on-disk clock.
   await persistJob(config, job, control);
 
@@ -541,6 +561,10 @@ async function ensurePushedBeforeReview(
   job.error = prefix;
   await setStage(config, job, "stuck", control, callbacks);
   return false;
+}
+
+function challengerBriefForJob(job: JobRecord): string {
+  return isDocsJob(job) ? DOCS_INTERROGATE_CHALLENGER_SECTION : CODE_INTERROGATE_CHALLENGER_SECTION;
 }
 
 export async function runJobLoop(
@@ -869,7 +893,9 @@ export async function runJobLoop(
         job,
         callbacks,
       );
-      const reviewPrompt = reviewPromptRaw + reviewRoundSupplement(job.reviewRound);
+      const interrogate = interrogateReviewEnabled(job, settings);
+      let reviewPrompt = reviewPromptRaw + reviewRoundSupplement(job.reviewRound);
+      if (interrogate) reviewPrompt += INTERROGATE_PRIMARY_REVIEW_SUPPLEMENT;
       const reviewSteer = control.drainSteer();
       const prLabel = job.dryRun ? "(dry run — simulated PR)" : String(job.prUrl);
       const reviewFull = reviewSteer
@@ -928,10 +954,82 @@ export async function runJobLoop(
           githubVerdict,
           reviewOutput: reviewRun.output,
           outputFormat,
-          mirrorToPr: (body) => postPrComment(wt, prNumber, body),
+          mirrorToPr: interrogate ? undefined : (body) => postPrComment(wt, prNumber, body),
           log: (line) => runnerLog(callbacks, job, line),
         });
         verdict = resolved?.verdict ?? null;
+
+        if (interrogate) {
+          const primaryText = reviewerFinalText(reviewRun.output, outputFormat);
+          const primaryVerdict =
+            verdict ?? parsePrimaryReviewVerdict(reviewRun.output, outputFormat);
+          if (!primaryVerdict) {
+            job.error =
+              "Primary reviewer did not return VERDICT: APPROVE or VERDICT: CHANGES in the local message (interrogate mode)";
+            await setStage(config, job, "failed", control, callbacks);
+            return;
+          }
+          await runnerLog(
+            callbacks,
+            job,
+            `[runner] Interrogate: running challenger model (${challengerModelForJob(job)}).`,
+          );
+          const challengerBrief = challengerBriefForJob(job);
+          const challengerPrompt = `${challengerBrief}\n\nPR: ${prLabel}\n\n--- primary review (context) ---\n${primaryText}`;
+          const challengerRun = await runAgentStage(
+            runner,
+            config,
+            job,
+            control,
+            settings,
+            "reviewing",
+            {
+              cwd: wt,
+              prompt: challengerPrompt,
+              model: challengerModelForJob(job),
+              logPath: job.logPath,
+              dryRun: job.dryRun,
+              outputFormat,
+              signal: control.signal,
+              driverId: job.driverId,
+              driverEntry,
+            },
+            callbacks?.watchdogTiming,
+            { key: "challenger", model: challengerModelForJob(job) },
+          );
+          if (await checkStop()) return;
+          if (!challengerRun || challengerRun.code !== 0) {
+            job.error = challengerRun
+              ? `challenger reviewer exited ${challengerRun.code}`
+              : "Watchdog exhausted (challenger review)";
+            await setStage(config, job, challengerRun ? "failed" : "stuck", control, callbacks);
+            return;
+          }
+          const challengerText = reviewerFinalText(challengerRun.output, outputFormat);
+          const parsed = parseInterrogateFindings(challengerText);
+          const verifiedRound = await verifyInterrogateFindings(wt, parsed);
+          verifiedRound.dropped.selfReportedCount = challengerDroppedSelfReport(
+            challengerText,
+            outputFormat,
+          );
+          verdict = resolveInterrogateVerdict(primaryVerdict, verifiedRound.verified);
+          const combined = buildCombinedInterrogateComment({
+            primaryText,
+            verified: verifiedRound.verified,
+            dropped: verifiedRound.dropped,
+            verdict,
+          });
+          const posted = await postPrComment(wt, prNumber, combined).catch(() => false);
+          await runnerLog(
+            callbacks,
+            job,
+            `[runner] Interrogate: ${verifiedRound.verified.length} verified finding(s); ` +
+              `${verifiedRound.dropped.runnerDroppedCount} dropped on re-run; ` +
+              (posted
+                ? "posted combined review comment."
+                : "could not post combined review comment."),
+          );
+        }
       }
 
       if (!verdict) {

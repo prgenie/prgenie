@@ -187,6 +187,9 @@ async function readJobFile(
     } else if (job.stageModels && !job.stageModels.rereview && job.stageModels.review) {
       job.stageModels.rereview = job.stageModels.review;
     }
+    if (job.stageModels && !job.stageModels.challenger) {
+      job.stageModels.challenger = job.stageModels.rereview || job.stageModels.review || job.model;
+    }
     if (
       job.effectiveSnapshot?.stageModels &&
       !job.effectiveSnapshot.stageModels.rereview &&
@@ -422,7 +425,11 @@ export async function createJob(
     docsTemplate,
     title,
     ...(args.expectPr === false ? { expectPr: false as const } : {}),
+    ...(args.interrogateReview === true ? { interrogateReview: true as const } : {}),
+    ...(args.interrogateReview === false ? { interrogateReview: false as const } : {}),
   };
+  const interrogateReview =
+    args.interrogateReview !== undefined ? args.interrogateReview : settings.interrogateReview;
   const logPath = jobLogFile(dataDir, id);
   await writeFile(logPath, "", "utf8");
   const job: JobRecord = {
@@ -439,6 +446,7 @@ export async function createJob(
       review: stageResolved.review,
       rereview: stageResolved.rereview,
       fix: stageResolved.fix,
+      challenger: stageResolved.challenger,
     },
     effectiveSnapshot: (() => {
       const wd = resolveJobWatchdogSnapshot(jobType, settings, args.watchdog);
@@ -449,11 +457,13 @@ export async function createJob(
           review: stageResolved.review,
           rereview: stageResolved.rereview,
           fix: stageResolved.fix,
+          challenger: stageResolved.challenger,
         },
         baseRef: settings.defaultBaseBranch,
         watchdogInactivityMs: wd.inactivityMs,
         watchdogStageCapMs: wd.stageCapMs,
         watchdogRecoveryAttempts: wd.recoveryAttempts,
+        interrogateReview,
       };
     })(),
     watchdog: {

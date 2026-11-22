@@ -33,6 +33,18 @@ describe("runner settings", () => {
     assert.equal(s.autoContinueOnBoot, true);
     assert.equal(s.stageModels.fix, "auto");
     assert.equal(s.stageModels.rereview, "auto");
+    assert.equal(s.stageModels.challenger, "auto");
+    assert.equal(s.interrogateReview, false);
+  });
+
+  it("persists interrogateReview and challenger stage model", async () => {
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), "lr-set-interrogate-"));
+    const saved = await saveSettings(dataDir, {
+      interrogateReview: true,
+      stageModels: { challenger: "gpt-challenger" },
+    });
+    assert.equal(saved.interrogateReview, true);
+    assert.equal(saved.stageModels.challenger, "gpt-challenger");
   });
 
   it("defaults a missing rereview to auto and keeps an explicit fix model", async () => {

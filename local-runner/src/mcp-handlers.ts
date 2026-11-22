@@ -35,7 +35,17 @@ export const RUNNER_MCP_TOOLS = [
             review: { type: "string" },
             rereview: { type: "string" },
             fix: { type: "string" },
+            challenger: {
+              type: "string",
+              description:
+                "Adversarial challenger model when interrogateReview is on (#249); should differ from review when possible",
+            },
           },
+        },
+        interrogateReview: {
+          type: "boolean",
+          description:
+            "Run a second challenger review after the primary reviewer (#249). Off by default; adds model cost and latency.",
         },
         driver: {
           type: "string",

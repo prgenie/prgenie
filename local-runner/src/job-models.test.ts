@@ -8,8 +8,16 @@ import path from "node:path";
 import { AgentRunner, type AgentRunOptions } from "./agent.js";
 import { JobControl } from "./job-control.js";
 import { runJobLoop } from "./job-runner.js";
-import { modelForActiveStage, resolveStageModelsForJob } from "./job-models.js";
-import { BUILTIN_FIX_MODEL, BUILTIN_REREVIEW_MODEL } from "./runner-policy.js";
+import {
+  challengerModelForJob,
+  modelForActiveStage,
+  resolveStageModelsForJob,
+} from "./job-models.js";
+import {
+  BUILTIN_CHALLENGER_MODEL,
+  BUILTIN_FIX_MODEL,
+  BUILTIN_REREVIEW_MODEL,
+} from "./runner-policy.js";
 import { runnerSettingsFile } from "./paths.js";
 import { createJob, loadJob } from "./store.js";
 import type { JobInput } from "./types.js";
@@ -57,6 +65,35 @@ describe("stage models", () => {
     assert.equal(resolved.review, "composer-2.5");
     assert.equal(resolved.rereview, BUILTIN_REREVIEW_MODEL);
     assert.equal(resolved.fix, BUILTIN_FIX_MODEL);
+    assert.equal(resolved.challenger, BUILTIN_CHALLENGER_MODEL);
+    assert.notEqual(resolved.challenger, resolved.review);
+  });
+
+  it("challenger follows an explicit model that differs from review", async () => {
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), "lr-models-challenger-"));
+    const resolved = resolveStageModelsForJob(
+      testConfig(dataDir),
+      await loadSettings(dataDir),
+      {
+        repoPath: "/r",
+        branch: "b",
+        promptFile: "/p",
+        stageModels: { review: "review-a", challenger: "challenger-b" },
+      },
+      "cursor-agent",
+    );
+    assert.equal(resolved.review, "review-a");
+    assert.equal(resolved.challenger, "challenger-b");
+  });
+
+  it("challengerModelForJob uses the snapshotted challenger stage", async () => {
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), "lr-models-challenger-job-"));
+    const job = await createJob(
+      dataDir,
+      { repoPath: "/r", branch: "b", promptFile: "/p", dryRun: true },
+      { model: "composer-2.5", dryRun: true, config: testConfig(dataDir) },
+    );
+    assert.equal(challengerModelForJob(job), job.stageModels?.challenger);
   });
 
   it("legacy single model applies to all stages", async () => {
@@ -181,6 +218,7 @@ describe("stage models", () => {
         review: "settings-review",
         rereview: "settings-rereview",
         fix: "settings-fix",
+        challenger: "settings-challenger",
       },
     };
     const allRequest = {
@@ -190,42 +228,57 @@ describe("stage models", () => {
         review: "request-review",
         rereview: "request-rereview",
         fix: "request-fix",
+        challenger: "request-challenger",
       },
     };
 
     it("request stage model wins over everything", async () => {
       const r = await resolveWith(allSettings, allRequest);
       assert.deepEqual(
-        [r.build, r.review, r.rereview, r.fix],
-        ["request-build", "request-review", "request-rereview", "request-fix"],
+        [r.build, r.review, r.rereview, r.fix, r.challenger],
+        [
+          "request-build",
+          "request-review",
+          "request-rereview",
+          "request-fix",
+          "request-challenger",
+        ],
       );
       assert.deepEqual(r.sources, {
         build: "job",
         review: "job",
         rereview: "job",
         fix: "job",
+        challenger: "job",
       });
     });
 
     it("request model is next", async () => {
       const r = await resolveWith(allSettings, { model: "request-all" });
       assert.deepEqual(
-        [r.build, r.review, r.rereview, r.fix],
-        ["request-all", "request-all", "request-all", "request-all"],
+        [r.build, r.review, r.rereview, r.fix, r.challenger],
+        ["request-all", "request-all", "request-all", "request-all", "settings-challenger"],
       );
     });
 
     it("settings stage models come after the request", async () => {
       const r = await resolveWith(allSettings, {});
       assert.deepEqual(
-        [r.build, r.review, r.rereview, r.fix],
-        ["settings-build", "settings-review", "settings-rereview", "settings-fix"],
+        [r.build, r.review, r.rereview, r.fix, r.challenger],
+        [
+          "settings-build",
+          "settings-review",
+          "settings-rereview",
+          "settings-fix",
+          "settings-challenger",
+        ],
       );
       assert.deepEqual(r.sources, {
         build: "settings",
         review: "settings",
         rereview: "settings",
         fix: "settings",
+        challenger: "settings",
       });
     });
 
@@ -233,26 +286,34 @@ describe("stage models", () => {
       const r = await resolveWith(
         {
           defaultModel: "settings-default",
-          stageModels: { build: null, review: null, rereview: null, fix: null },
+          stageModels: { build: null, review: null, rereview: null, fix: null, challenger: null },
         },
         {},
       );
       assert.deepEqual(
-        [r.build, r.review, r.rereview, r.fix],
-        ["settings-default", "settings-default", "auto", "auto"],
+        [r.build, r.review, r.rereview, r.fix, r.challenger],
+        ["settings-default", "settings-default", "auto", "auto", "auto"],
       );
       assert.equal(r.sources.fix, "builtin");
       assert.equal(r.sources.rereview, "builtin");
+      assert.equal(r.sources.challenger, "builtin");
     });
 
     it("env model is the last resort, and never replaces the auto fix default", async () => {
-      const r = await resolveWith({ stageModels: { fix: null, rereview: null } }, {});
-      assert.deepEqual([r.build, r.review, r.rereview, r.fix], [ENV, ENV, "auto", "auto"]);
+      const r = await resolveWith(
+        { stageModels: { fix: null, rereview: null, challenger: null } },
+        {},
+      );
+      assert.deepEqual(
+        [r.build, r.review, r.rereview, r.fix, r.challenger],
+        [ENV, ENV, "auto", "auto", "auto"],
+      );
       assert.deepEqual(r.sources, {
         build: "env",
         review: "env",
         rereview: "builtin",
         fix: "builtin",
+        challenger: "builtin",
       });
     });
 
@@ -293,6 +354,7 @@ describe("stage models", () => {
       review: "composer-2.5",
       rereview: "composer-2.5",
       fix: "auto",
+      challenger: "auto",
     });
     assert.equal(modelForActiveStage(stored!, "building"), "composer-2.5");
     assert.equal(modelForActiveStage(stored!, "fixing"), "auto");
