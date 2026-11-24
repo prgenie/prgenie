@@ -137,6 +137,7 @@ async function main() {
   <Default Extension=".vsixmanifest" ContentType="text/xml" />
   <Default Extension=".js" ContentType="application/javascript" />
   <Default Extension=".svg" ContentType="image/svg+xml" />
+  <Default Extension=".png" ContentType="image/png" />
 </Types>
 `;
 
@@ -148,9 +149,15 @@ async function main() {
     { name: "extension/dist/extension.js", data: await readFile(distJs) },
   ];
 
-  const icon = path.join(extDir, "media", "icon.svg");
-  if (existsSync(icon)) {
-    files.push({ name: "extension/media/icon.svg", data: await readFile(icon) });
+  const mediaDir = path.join(extDir, "media");
+  if (existsSync(mediaDir)) {
+    for (const name of await readdir(mediaDir)) {
+      if (name.startsWith(".")) continue;
+      files.push({
+        name: `extension/media/${name}`,
+        data: await readFile(path.join(mediaDir, name)),
+      });
+    }
   }
 
   const outName = `prgenie-${version}.vsix`;
