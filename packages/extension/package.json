@@ -12,6 +12,7 @@
   },
   "bugs": "https://github.com/radiancelux/prgenie/issues",
   "homepage": "https://prgenie.ai",
+  "icon": "media/icon.png",
   "author": "PR Genie contributors",
   "engines": {
     "vscode": "^1.85.0"
