@@ -21,8 +21,22 @@ describe("continue_job MCP schema", () => {
     const tool = RUNNER_MCP_TOOLS.find((t) => t.name === "continue_job");
     assert.ok(tool);
     assert.deepEqual(tool!.inputSchema.required, ["id"]);
-    const props = tool!.inputSchema.properties as Record<string, unknown>;
+    const props = tool!.inputSchema.properties as Record<string, { description?: string }>;
     assert.ok(props.prompt && props.extraRounds && props.model);
+    assert.match(String(props.extraRounds.description), /Default 1/);
+    assert.match(String(props.extraRounds.description), /reviewRound/);
+    assert.match(tool!.description, /priorMaxRounds/);
+    assert.match(tool!.description, /extraRounds 0/);
+  });
+});
+
+describe("steer_job MCP schema", () => {
+  it("describes pending guidance on recoverable terminal jobs", () => {
+    const tool = RUNNER_MCP_TOOLS.find((t) => t.name === "steer_job");
+    assert.ok(tool);
+    assert.match(tool!.description, /continue_job/);
+    assert.match(tool!.description, /failed/);
+    assert.match(tool!.description, /Approved/);
   });
 });
 

@@ -22,6 +22,7 @@ import { fetchRateLimitResets, isGithubRateLimitResult } from "./github-rate-lim
 import { restFindOpenPrForBranchOnce } from "./github-rest.js";
 import { shouldResumePostBuildPr } from "./job-pr-policy.js";
 import { assertContinueMaxRounds, normalizeContinueJobArgs } from "./settings-validation.js";
+import { ValidationError } from "./validation-error.js";
 import type { GhResult } from "./spawn-cmd.js";
 import type { ContinueJobArgs } from "./types.js";
 
@@ -189,6 +190,11 @@ export async function prepareJobContinue(
 
   // A build resume has not spent any review rounds yet, so it adds none unless asked.
   const extraRounds = args.extraRounds ?? (resumeBuild || resumePostBuildPr ? 0 : 1);
+  if (extraRounds === 0 && !resumeBuild && !resumePostBuildPr && job.reviewRound >= job.maxRounds) {
+    throw new ValidationError(
+      `extraRounds 0 leaves maxRounds at ${job.maxRounds}, but reviewRound is already ${job.reviewRound}; pass extraRounds >= 1 to raise the cap`,
+    );
+  }
   assertContinueMaxRounds(job.maxRounds, extraRounds);
   const nextMax = job.maxRounds + extraRounds;
 

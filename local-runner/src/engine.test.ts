@@ -11,6 +11,7 @@ import { JobControl } from "./job-control.js";
 import { createJob, loadJob, saveJob } from "./store.js";
 import { loadSettings, saveSettings } from "./settings.js";
 import { BranchConflictError } from "./job-queue.js";
+import { SteerJobError } from "./job-steer.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -77,6 +78,47 @@ describe("RunnerEngine steer/stop", () => {
 
     const restartedControl = JobControl.fromPersisted(reloaded!);
     assert.equal(restartedControl.drainSteer(), "mid-stage hint");
+  });
+
+  it("queues steer on a failed job until continue", async () => {
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), "lr-engine-"));
+    const engine = new RunnerEngine(testConfig(dataDir));
+    const job = await createJob(
+      dataDir,
+      { repoPath: "/tmp/repo", branch: "feat/x", promptFile: "/p", dryRun: true },
+      { model: "composer-2.5", dryRun: true, config: testConfig(dataDir) },
+    );
+    job.stage = "failed";
+    job.prUrl = "https://github.com/o/r/pull/1";
+    await saveJob(dataDir, job);
+
+    const updated = await engine.steer(job.id, "resolve the conflict first");
+    assert.equal(updated?.stage, "failed");
+    assert.deepEqual(updated?.steerQueue, ["resolve the conflict first"]);
+    assert.deepEqual((await loadJob(dataDir, job.id))?.steerQueue, ["resolve the conflict first"]);
+  });
+
+  it("rejects steer on an approved job and tells the caller to use continue_job", async () => {
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), "lr-engine-"));
+    const engine = new RunnerEngine(testConfig(dataDir));
+    const job = await createJob(
+      dataDir,
+      { repoPath: "/tmp/repo", branch: "feat/x", promptFile: "/p", dryRun: true },
+      { model: "composer-2.5", dryRun: true, config: testConfig(dataDir) },
+    );
+    job.stage = "approved";
+    await saveJob(dataDir, job);
+
+    await assert.rejects(
+      () => engine.steer(job.id, "more work"),
+      (err: unknown) => {
+        assert.ok(err instanceof SteerJobError);
+        assert.equal((err as SteerJobError).code, "rejected");
+        assert.match((err as Error).message, /continue_job/);
+        return true;
+      },
+    );
+    assert.deepEqual((await loadJob(dataDir, job.id))?.steerQueue, []);
   });
 
   it("stop requests abort on live JobControl", async () => {

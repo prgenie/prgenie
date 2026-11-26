@@ -871,6 +871,59 @@ function hasRow(d: Dashboard, id: string): boolean {
   return d.doc.querySelector(`#jobs tr.job-row[data-id="${id}"]`) !== null;
 }
 
+describe("runnerUiHtml steer on terminal jobs (#270)", () => {
+  it("enables steer on recoverable terminal jobs and keeps it off for approved and merged", async () => {
+    const jobs = stagedJobs([
+      "failed",
+      "stuck",
+      "interrupted",
+      "changes_remaining",
+      "stopped",
+      "approved",
+      "building",
+    ]);
+    const merged = {
+      ...jobs[0],
+      id: "job-merged",
+      stage: "failed",
+      title: "merged agent",
+      ciStatus: {
+        ...jobs[0].ciStatus,
+        status: "merged",
+        mergedAt: new Date().toISOString(),
+      },
+    } as unknown as FixtureJob;
+    await withDashboard({ jobs: [...jobs, merged] }, async (d) => {
+      const steer = () => d.doc.getElementById("steerPrompt") as HTMLTextAreaElement;
+      const btn = () => d.doc.getElementById("steerBtn") as HTMLButtonElement;
+      const stop = () => d.doc.getElementById("stopBtn") as HTMLButtonElement;
+      const label = () => d.doc.querySelector('label[for="steerPrompt"]');
+
+      for (const stage of ["failed", "stuck", "interrupted", "changes_remaining", "stopped"]) {
+        d.tableToggle(`job-${stage}`).click();
+        assert.equal(steer().disabled, false, `steer enabled for ${stage}`);
+        assert.equal(btn().disabled, false, `steer button enabled for ${stage}`);
+        assert.equal(stop().disabled, true, `stop stays disabled for ${stage}`);
+        assert.match(label()?.textContent ?? "", /next continue/);
+      }
+
+      d.tableToggle("job-approved").click();
+      assert.equal(steer().disabled, true, "steer disabled for approved");
+      assert.equal(btn().disabled, true);
+      assert.equal(stop().disabled, true);
+
+      d.tableToggle("job-merged").click();
+      assert.equal(steer().disabled, true, "steer disabled for merged");
+      assert.equal(btn().disabled, true);
+
+      d.tableToggle("job-building").click();
+      assert.equal(steer().disabled, false, "steer enabled while running");
+      assert.equal(stop().disabled, false);
+      assert.match(label()?.textContent ?? "", /next agent step/);
+    });
+  });
+});
+
 describe("runnerUiHtml job removal (archive)", () => {
   it("offers Remove only for terminal stages and never while a job is running", async () => {
     await withDashboard(

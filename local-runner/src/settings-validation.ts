@@ -139,7 +139,8 @@ export function validateArenaCandidateModels(
 
 export function validateExtraRounds(n: unknown): number {
   if (n === undefined || n === null) return 1;
-  return validateBoundedInt(n, "extraRounds", 1, MAX_ROUNDS_MAX);
+  // 0 retries within the existing maxRounds budget (prepareJobContinue enforces remaining rounds).
+  return validateBoundedInt(n, "extraRounds", 0, MAX_ROUNDS_MAX);
 }
 
 /**

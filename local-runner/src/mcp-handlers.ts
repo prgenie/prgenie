@@ -144,7 +144,8 @@ export const RUNNER_MCP_TOOLS = [
   },
   {
     name: "steer_job",
-    description: "Queue a follow-up prompt for the next agent step (or after current step).",
+    description:
+      "Queue a follow-up prompt for the next agent step on a running job, or as pending guidance applied on the next continue_job when the job is failed, stuck, interrupted, stopped, or changes_remaining. Approved, archived, and merged jobs are rejected; pass prompt to continue_job instead.",
     inputSchema: {
       type: "object",
       properties: { id: { type: "string" }, prompt: { type: "string" } },
@@ -182,7 +183,7 @@ export const RUNNER_MCP_TOOLS = [
   {
     name: "continue_job",
     description:
-      "Run additional fix→review round(s) on a terminal job (approved, changes_remaining, stuck, stopped, failed, or interrupted). When the job has no PR yet, re-runs its build stage on the same branch/worktree instead (then opens a PR when ready).",
+      "Run additional fix→review round(s) on a terminal job (approved, changes_remaining, stuck, stopped, failed, or interrupted). extraRounds is cumulative: omit it to add 1 to maxRounds when a PR exists. Pass extraRounds 0 to retry within the existing cap when reviewRound is still below maxRounds. The response includes priorMaxRounds and maxRounds. When the job has no PR yet, re-runs its build stage on the same branch/worktree instead (then opens a PR when ready; extraRounds defaults to 0). For a terminal job, pass prompt here rather than steer_job when the job is approved, archived, or merged.",
     inputSchema: {
       type: "object",
       properties: {
@@ -191,7 +192,8 @@ export const RUNNER_MCP_TOOLS = [
         promptFile: { type: "string" },
         extraRounds: {
           type: "number",
-          description: "Default 1 (0 when resuming a pre-PR build)",
+          description:
+            "Added to maxRounds (cumulative). Default 1 when a PR exists, 0 when resuming a pre-PR build. 0 retries without raising the cap, valid only when reviewRound < maxRounds.",
         },
         model: {
           type: "string",
