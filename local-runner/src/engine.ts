@@ -29,6 +29,8 @@ import { loadSettings } from "./settings.js";
 import {
   BranchConflictError,
   decideJobStart,
+  formatTerminalBranchOwnerError,
+  terminalJobsOwningBranch,
   listJobsForQueue,
   runnableQueuedJobs,
 } from "./job-queue.js";
@@ -68,6 +70,8 @@ import { liveWorkerLock, readWorkerLock } from "./job-worker-lock.js";
 import { inspectRestartState } from "./runner-restart.js";
 import { appendFile, stat } from "node:fs/promises";
 import { assertSubmitPromptFiles } from "./prompt-file.js";
+import { worktreePathsEqual } from "./worktree.js";
+import { worktreePathExists } from "./worktree-cleanup.js";
 
 const ACTIVE_STAGES = new Set(["building", "reviewing", "fixing"]);
 
@@ -85,6 +89,31 @@ function useDetachedJobWorkers(): boolean {
   if (process.env.PRGENIE_RUNNER_DETACHED_JOBS === "1") return true;
   const role = process.env.PRGENIE_RUNNER_ROLE?.trim();
   return role === "serve";
+}
+
+/**
+ * Refuse a new job on a branch a failed/stopped/… job still owns (open PR or worktree on disk),
+ * so callers continue that job instead of forking a duplicate (#269). Shared by HTTP, MCP and CLI,
+ * which all start jobs through {@link RunnerEngine.startJob}.
+ */
+async function assertNoTerminalBranchOwner(
+  jobs: JobRecord[],
+  branch: string,
+  repoSlug: string,
+  repoPath: string | undefined,
+): Promise<void> {
+  const existing = new Set<string>();
+  for (const j of jobs) {
+    const wt = j.worktreePath?.trim();
+    if (!wt || j.dryRun) continue;
+    // A job that ran in the main checkout has no worktree of its own to protect.
+    if (repoPath && worktreePathsEqual(wt, repoPath)) continue;
+    if (j.input.repoPath && worktreePathsEqual(wt, j.input.repoPath)) continue;
+    if (await worktreePathExists(wt)) existing.add(j.id);
+  }
+  const owners = terminalJobsOwningBranch(jobs, branch, repoSlug, (j) => existing.has(j.id));
+  const owner = owners[0];
+  if (owner) throw new BranchConflictError(formatTerminalBranchOwnerError(owner, branch));
 }
 
 export class RunnerEngine extends EventEmitter {
@@ -207,6 +236,7 @@ export class RunnerEngine extends EventEmitter {
     if (decision.action === "reject") {
       throw new BranchConflictError(decision.reason);
     }
+    await assertNoTerminalBranchOwner(jobs, args.branch, repoSlug, target.repoPath);
     const effectiveDryRun = args.dryRun ?? this.config.dryRun;
     const preflight = await runJobStartPreflight(target, args, settings, effectiveDryRun);
     if (preflight.blocking.length) {

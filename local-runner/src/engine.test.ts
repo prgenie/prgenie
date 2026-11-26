@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -262,5 +262,76 @@ describe("RunnerEngine queue", () => {
     const engine = new RunnerEngine(testConfig(dataDir));
     const archived = await engine.archive(job.id);
     assert.equal(archived.ok, true);
+  });
+});
+
+describe("RunnerEngine start refuses a branch a terminal job still owns (#269)", () => {
+  async function setup(tag: string) {
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), `lr-engine-own-${tag}-`));
+    const repo = await mkdtemp(path.join(os.tmpdir(), `lr-engine-own-${tag}-repo-`));
+    await initBareGitRepo(repo);
+    const promptFile = path.join(repo, "prompt.md");
+    await writeFile(promptFile, "implement\n", "utf8");
+    const engine = new RunnerEngine(testConfig(dataDir), { watchCi: false });
+    const args = { repoPath: repo, branch: "fix/dup", promptFile, dryRun: true };
+    const seed = async (patch: Record<string, unknown>) => {
+      const job = await createJob(
+        dataDir,
+        { repoPath: repo, branch: "fix/dup", promptFile, maxRounds: 1, dryRun: true },
+        { model: "composer-2.5", dryRun: true, config: testConfig(dataDir) },
+      );
+      Object.assign(job, { dryRun: false, worktreePath: null }, patch);
+      await saveJob(dataDir, job);
+      return job;
+    };
+    return { dataDir, repo, engine, args, seed };
+  }
+
+  it("rejects a start when a failed job on the branch has an open PR, naming the job", async () => {
+    const { engine, args, seed } = await setup("pr");
+    const owner = await seed({
+      stage: "failed",
+      prUrl: "https://github.com/o/r/pull/387",
+      prNumber: 387,
+    });
+    await assert.rejects(engine.startJob(args), (err: unknown) => {
+      assert.ok(err instanceof BranchConflictError);
+      assert.match(err.message, new RegExp(owner.id));
+      assert.match(err.message, /stage failed/);
+      assert.match(err.message, /pull\/387/);
+      assert.match(err.message, /continue_job/);
+      assert.match(err.message, /archive/);
+      return true;
+    });
+  });
+
+  it("rejects a start when a stopped job still has its worktree on disk", async () => {
+    const { engine, args, seed } = await setup("wt");
+    const wt = await mkdtemp(path.join(os.tmpdir(), "lr-engine-own-wt-dir-"));
+    await mkdir(wt, { recursive: true });
+    const owner = await seed({ stage: "stopped", worktreePath: wt });
+    await assert.rejects(engine.startJob(args), new RegExp(`job ${owner.id}`));
+  });
+
+  it("allows a follow-up after an approved job, a merged PR, or a released worktree", async () => {
+    const { engine, args, seed } = await setup("ok");
+    await seed({ stage: "approved", prUrl: "https://github.com/o/r/pull/1", prNumber: 1 });
+    await seed({
+      stage: "failed",
+      prUrl: "https://github.com/o/r/pull/2",
+      prNumber: 2,
+      ciStatus: { status: "merged", checkedAt: "2026-11-25T00:00:00.000Z", source: "github" },
+    });
+    await seed({
+      stage: "failed",
+      worktreePath: path.join(os.tmpdir(), "lr-gone-wt-does-not-exist"),
+    });
+    await seed({
+      stage: "failed",
+      prUrl: "https://github.com/o/r/pull/3",
+      archivedAt: "2026-11-25T00:00:00.000Z",
+    });
+    const started = await engine.startJob(args);
+    assert.ok(started.id);
   });
 });

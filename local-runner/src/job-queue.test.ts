@@ -1,7 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { JobRecord } from "./types.js";
-import { decideJobStart, runnableQueuedJobs } from "./job-queue.js";
+import {
+  decideJobStart,
+  formatTerminalBranchOwnerError,
+  runnableQueuedJobs,
+  terminalJobsOwningBranch,
+} from "./job-queue.js";
 
 function job(partial: Partial<JobRecord>): JobRecord {
   return {
@@ -136,5 +141,63 @@ describe("runnableQueuedJobs", () => {
       runnableQueuedJobs(jobs, 1, { isRunning: () => false }).map((j) => j.id),
       ["q"],
     );
+  });
+});
+
+describe("terminalJobsOwningBranch (#269)", () => {
+  const noWt = () => false;
+  const pr = "https://github.com/o/r/pull/9";
+
+  it("finds failed, stuck, stopped, changes_remaining and interrupted jobs with an open PR", () => {
+    for (const stage of [
+      "failed",
+      "stuck",
+      "stopped",
+      "changes_remaining",
+      "interrupted",
+    ] as const) {
+      const jobs = [onBranch("feat/x", { id: "old", stage, dryRun: false, prUrl: pr })];
+      assert.deepEqual(
+        terminalJobsOwningBranch(jobs, "feat/x", "o/r", noWt).map((j) => j.id),
+        ["old"],
+        stage,
+      );
+    }
+  });
+
+  it("counts a job worktree on disk even without a PR", () => {
+    const jobs = [
+      onBranch("feat/x", { id: "old", stage: "failed", dryRun: false, worktreePath: "/wt" }),
+    ];
+    assert.equal(terminalJobsOwningBranch(jobs, "feat/x", "o/r", (j) => j.id === "old").length, 1);
+    assert.equal(terminalJobsOwningBranch(jobs, "feat/x", "o/r", noWt).length, 0);
+  });
+
+  it("ignores approved, archived, dry-run, merged, other-branch and other-repo jobs", () => {
+    const merged = { status: "merged" as const, checkedAt: "x", source: "github" as const };
+    const jobs = [
+      onBranch("feat/x", { id: "a", stage: "approved", dryRun: false, prUrl: pr }),
+      onBranch("feat/x", { id: "b", stage: "failed", dryRun: false, prUrl: pr, archivedAt: "x" }),
+      onBranch("feat/x", { id: "c", stage: "failed", dryRun: true, prUrl: pr }),
+      onBranch("feat/x", { id: "d", stage: "failed", dryRun: false, prUrl: pr, ciStatus: merged }),
+      onBranch("feat/y", { id: "e", stage: "failed", dryRun: false, prUrl: pr }),
+      onBranch("feat/x", {
+        id: "f",
+        stage: "failed",
+        dryRun: false,
+        prUrl: pr,
+        repoSlug: "o/other",
+      }),
+    ];
+    assert.deepEqual(terminalJobsOwningBranch(jobs, "feat/x", "o/r", noWt), []);
+  });
+
+  it("formats an error naming the job, stage, PR, and continue_job", () => {
+    const msg = formatTerminalBranchOwnerError(
+      onBranch("feat/x", { id: "f3d55c36", stage: "failed", prUrl: pr }),
+      "feat/x",
+    );
+    assert.match(msg, /job f3d55c36 \(stage failed, PR https:\/\/github.com\/o\/r\/pull\/9\)/);
+    assert.match(msg, /continue_job on f3d55c36/);
   });
 });

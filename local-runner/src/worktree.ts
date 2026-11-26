@@ -1,4 +1,4 @@
-import { appendFile, mkdir, rm, access } from "node:fs/promises";
+import { appendFile, mkdir, rm, access, readFile } from "node:fs/promises";
 import path from "node:path";
 import {
   arenaCandidateBranch,
@@ -592,23 +592,181 @@ export async function abortGitOperationInProgress(
   return { ok: false, error: err };
 }
 
-/** Update the branch tip onto the default base with merge (not rebase) so a normal push works. */
-export async function mergeOntoBase(worktree: string, settings?: RunnerSettings): Promise<void> {
-  await git(worktree, ["fetch", "origin"]);
+const MERGE_OUTPUT_CAP = 1500;
+
+/** Trim and cap combined git stdout/stderr so job errors stay readable. */
+export function capGitOutput(stdout: string, stderr: string, cap = MERGE_OUTPUT_CAP): string {
+  const text = [stdout.trim(), stderr.trim()].filter(Boolean).join("\n");
+  if (text.length <= cap) return text;
+  return `${text.slice(0, cap)}… (truncated)`;
+}
+
+/** Paths git still reports as unmerged (conflicted) in the worktree. */
+export async function listUnmergedFiles(worktree: string, gitImpl: GitFn = git): Promise<string[]> {
+  const res = await gitImpl(worktree, ["diff", "--name-only", "--diff-filter=U"]);
+  if (res.code !== 0) return [];
+  return [
+    ...new Set(
+      res.stdout
+        .split("\n")
+        .map((l) => l.trim())
+        .filter(Boolean),
+    ),
+  ];
+}
+
+export type MergeOntoBaseResult =
+  | { status: "up_to_date"; base: string }
+  | { status: "merged"; base: string }
+  /**
+   * The merge stopped on conflicts and was left in progress (MERGE_HEAD set) so an agent can
+   * resolve it. `resumed` is true when an earlier unfinished merge was found instead of started.
+   */
+  | { status: "conflict"; base: string; files: string[]; output: string; resumed: boolean };
+
+/** Thrown when merging the base fails for a reason other than resolvable conflicts. */
+export class MergeOntoBaseError extends Error {
+  constructor(
+    message: string,
+    readonly base: string,
+    readonly files: string[],
+  ) {
+    super(message);
+    this.name = "MergeOntoBaseError";
+  }
+}
+
+export function formatMergeFailure(
+  base: string,
+  files: string[],
+  stdout: string,
+  stderr: string,
+): string {
+  const parts = [`git merge ${base} failed`];
+  if (files.length) parts.push(`conflicting files: ${files.join(", ")}`);
+  const out = capGitOutput(stdout, stderr);
+  parts.push(out ? `git output: ${out}` : "git produced no output");
+  return parts.join("; ");
+}
+
+/**
+ * Merge the default base into the branch (never rebase). On conflicts, leave the merge in
+ * progress and report the conflicting paths instead of throwing, so the fix agent can resolve
+ * them (#239). An already-unfinished merge is reported the same way rather than merged again.
+ */
+export async function mergeOntoBaseOrConflict(
+  worktree: string,
+  settings?: RunnerSettings,
+  gitImpl: GitFn = git,
+): Promise<MergeOntoBaseResult> {
   const order = settings ? baseRefProbeOrder(settings) : ["origin/main", "origin/master", "main"];
+  const pending = await gitImpl(worktree, ["rev-parse", "-q", "--verify", "MERGE_HEAD"]);
+  if (pending.code === 0) {
+    const files = await listUnmergedFiles(worktree, gitImpl);
+    return {
+      status: "conflict",
+      base: order[0] ?? "origin/main",
+      files,
+      output: "",
+      resumed: true,
+    };
+  }
+  await gitImpl(worktree, ["fetch", "origin"]);
   for (const base of order) {
-    const probe = await git(worktree, ["rev-parse", "--verify", base]);
+    const probe = await gitImpl(worktree, ["rev-parse", "--verify", base]);
     if (probe.code !== 0) continue;
     const baseSha = probe.stdout.trim();
-    const contains = await git(worktree, ["merge-base", "--is-ancestor", baseSha, "HEAD"]);
-    if (contains.code === 0) return;
-    const mg = await git(worktree, ["merge", "--no-edit", base]);
-    if (mg.code !== 0) {
-      throw new Error(`git merge ${base} failed: ${mg.stderr.trim()}`);
+    const contains = await gitImpl(worktree, ["merge-base", "--is-ancestor", baseSha, "HEAD"]);
+    if (contains.code === 0) return { status: "up_to_date", base };
+    const mg = await gitImpl(worktree, ["merge", "--no-edit", base]);
+    if (mg.code === 0) return { status: "merged", base };
+    const files = await listUnmergedFiles(worktree, gitImpl);
+    const inProgress = await gitImpl(worktree, ["rev-parse", "-q", "--verify", "MERGE_HEAD"]);
+    if (files.length > 0 && inProgress.code === 0) {
+      return {
+        status: "conflict",
+        base,
+        files,
+        output: capGitOutput(mg.stdout, mg.stderr),
+        resumed: false,
+      };
     }
-    return;
+    throw new MergeOntoBaseError(
+      formatMergeFailure(base, files, mg.stdout, mg.stderr),
+      base,
+      files,
+    );
   }
   throw new Error("Could not find origin/main or origin/master for merge");
+}
+
+/**
+ * Update the branch tip onto the default base with merge (not rebase) so a normal push works.
+ * Throws on conflicts with the conflicting files and git output in the message; the merge is
+ * left in progress. Callers that can hand conflicts to an agent use {@link mergeOntoBaseOrConflict}.
+ */
+export async function mergeOntoBase(
+  worktree: string,
+  settings?: RunnerSettings,
+  gitImpl: GitFn = git,
+): Promise<void> {
+  const res = await mergeOntoBaseOrConflict(worktree, settings, gitImpl);
+  if (res.status === "conflict") {
+    throw new MergeOntoBaseError(
+      formatMergeFailure(res.base, res.files, res.output, ""),
+      res.base,
+      res.files,
+    );
+  }
+}
+
+// Only the <<<<<<< / >>>>>>> markers: a bare "=======" line is also a Markdown heading underline.
+const CONFLICT_MARKER_RE = /^(?:<{7}|>{7})(?: |$)/m;
+
+/** True when text still contains git conflict markers. */
+export function hasConflictMarkers(text: string): boolean {
+  return CONFLICT_MARKER_RE.test(text);
+}
+
+export type MergeResolutionCheck = { ok: true } | { ok: false; reason: string; files: string[] };
+
+/**
+ * After an agent was asked to resolve merge conflicts: no merge may be left in progress, no path
+ * may still be unmerged, and none of the previously conflicted files may keep conflict markers.
+ */
+export async function verifyMergeResolved(
+  worktree: string,
+  conflictedFiles: string[],
+  opts: { gitImpl?: GitFn; readFileImpl?: (p: string) => Promise<string> } = {},
+): Promise<MergeResolutionCheck> {
+  const gitImpl = opts.gitImpl ?? git;
+  const readImpl = opts.readFileImpl ?? ((p: string) => readFile(p, "utf8"));
+  const unmerged = await listUnmergedFiles(worktree, gitImpl);
+  if (unmerged.length) {
+    return { ok: false, reason: "files are still unmerged", files: unmerged };
+  }
+  const withMarkers: string[] = [];
+  for (const f of conflictedFiles) {
+    let text: string;
+    try {
+      text = await readImpl(path.join(worktree, f));
+    } catch {
+      continue; // deleted while resolving
+    }
+    if (hasConflictMarkers(text)) withMarkers.push(f);
+  }
+  if (withMarkers.length) {
+    return { ok: false, reason: "conflict markers remain", files: withMarkers };
+  }
+  const pending = await gitImpl(worktree, ["rev-parse", "-q", "--verify", "MERGE_HEAD"]);
+  if (pending.code === 0) {
+    return {
+      ok: false,
+      reason: "the merge was not committed (MERGE_HEAD is still set)",
+      files: [],
+    };
+  }
+  return { ok: true };
 }
 
 /** @deprecated Use mergeOntoBase — rebasing rewrites pushed history. */
