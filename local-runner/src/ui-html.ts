@@ -246,6 +246,23 @@ export function runnerUiHtml(
       "stuck",
       "interrupted",
     ]);
+    // Mirrors STEER_PENDING_STAGES in job-steer.ts — guidance is stored until continue_job.
+    const STEER_PENDING_STAGES = new Set([
+      "failed",
+      "stuck",
+      "interrupted",
+      "changes_remaining",
+      "stopped",
+    ]);
+    function jobIsMerged(j) {
+      return Boolean(j && j.ciStatus && (j.ciStatus.status === "merged" || j.ciStatus.mergedAt));
+    }
+    function canSteerJob(j) {
+      if (!j || j.archivedAt) return false;
+      if (jobIsMerged(j) || j.stage === "approved") return false;
+      if (!TERMINAL_STAGES.has(j.stage)) return true;
+      return STEER_PENDING_STAGES.has(j.stage);
+    }
     const steerEl = document.getElementById("steerPrompt");
     const continuePanel = document.getElementById("continuePanel");
     const continueEl = document.getElementById("continuePrompt");
@@ -343,11 +360,18 @@ export function runnerUiHtml(
     }
 
     function updateSteerUi() {
-      const disabled = !selected || TERMINAL_STAGES.has(selectedJobStage || "");
-      steerEl.disabled = disabled;
-      steerBtn.disabled = disabled;
-      stopBtn.disabled = !selected || TERMINAL_STAGES.has(selectedJobStage || "");
       const picked = selected ? lastJobs.find((j) => j.id === selected) : null;
+      const canSteer = Boolean(selected && canSteerJob(picked));
+      steerEl.disabled = !canSteer;
+      steerBtn.disabled = !canSteer;
+      stopBtn.disabled = !selected || TERMINAL_STAGES.has(selectedJobStage || "");
+      const steerLabel = document.querySelector('label[for="steerPrompt"]');
+      if (steerLabel) {
+        steerLabel.textContent =
+          canSteer && picked && STEER_PENDING_STAGES.has(picked.stage)
+            ? "Steer (queued until the next continue)"
+            : "Steer (queued for next agent step)";
+      }
       const archived = Boolean(picked && picked.archivedAt);
       archiveBtn.hidden = !selected || (!archived && !TERMINAL_STAGES.has(selectedJobStage || ""));
       archiveBtn.dataset.action = archived ? "restore" : "archive";
@@ -1015,12 +1039,17 @@ export function runnerUiHtml(
           headers: authHeaders(true),
           body: JSON.stringify({ prompt }),
         });
+        const data = await res.json().catch(() => ({}));
         if (!res.ok) {
-          steerStatus.textContent = "Steer failed (" + res.status + ").";
+          steerStatus.textContent = data.error || ("Steer failed (" + res.status + ").");
           return;
         }
         steerEl.value = "";
-        steerStatus.textContent = "Queued for next agent step.";
+        const job = lastJobs.find((j) => j.id === selected);
+        steerStatus.textContent =
+          job && STEER_PENDING_STAGES.has(job.stage)
+            ? "Queued for the next continue."
+            : "Queued for next agent step.";
       } catch {
         steerStatus.textContent = "Steer failed (network).";
       }

@@ -12,6 +12,7 @@ import {
 } from "./notify-settings.js";
 import { loadSettings, saveSettings, SettingsConflictError, toPublicSettings } from "./settings.js";
 import { ContinueJobError } from "./job-continue.js";
+import { SteerJobError } from "./job-steer.js";
 import { ExtendWatchdogError } from "./watchdog-extend.js";
 import {
   normalizeStartJobArgs,
@@ -28,15 +29,6 @@ import {
   readBoundedBody,
   safeHandlerMessage,
 } from "./http-request.js";
-
-const TERMINAL_JOB_STAGES = new Set([
-  "approved",
-  "failed",
-  "stopped",
-  "changes_remaining",
-  "stuck",
-  "interrupted",
-]);
 
 export type HttpServerHooks = {
   /** Runs after the HTTP server has closed, before the process exits. */
@@ -77,11 +69,17 @@ const EXTEND_WATCHDOG_ERROR_STATUS: Record<ExtendWatchdogError["code"], number> 
   not_running: 409,
 };
 
+const STEER_ERROR_STATUS: Record<SteerJobError["code"], number> = {
+  archived: 409,
+  rejected: 409,
+};
+
 /** Validation is 400, a settings or branch conflict is 409, anything else is a server fault. */
 function errorStatus(err: unknown): number {
   if (err instanceof ValidationError) return 400;
   if (err instanceof ContinueJobError) return CONTINUE_ERROR_STATUS[err.code];
   if (err instanceof ExtendWatchdogError) return EXTEND_WATCHDOG_ERROR_STATUS[err.code];
+  if (err instanceof SteerJobError) return STEER_ERROR_STATUS[err.code];
   if (err instanceof SettingsConflictError || err instanceof BranchConflictError) return 409;
   return 500;
 }
@@ -107,6 +105,32 @@ export async function handleContinueJobRequest(
     return {
       status: errorStatus(err),
       body: { error: safeHandlerMessage(err), ...stage, ...rate },
+    };
+  }
+}
+
+/** POST /api/jobs/:id/steer: same policy as MCP steer_job. */
+export async function handleSteerJobRequest(
+  engine: RunnerEngine,
+  jobId: string,
+  payload: Record<string, unknown>,
+): Promise<{ status: number; body: unknown }> {
+  if (typeof payload.prompt !== "string" && payload.prompt !== undefined) {
+    return { status: 400, body: { error: "prompt must be a string" } };
+  }
+  const prompt = typeof payload.prompt === "string" ? payload.prompt : "";
+  try {
+    const job = await engine.steer(jobId, prompt);
+    if (!job) return { status: 404, body: { error: "not found" } };
+    return {
+      status: 200,
+      body: { ok: true, stage: job.stage, steerQueueLength: job.steerQueue.length },
+    };
+  } catch (err) {
+    const stage = err instanceof SteerJobError && err.stage ? { stage: err.stage } : {};
+    return {
+      status: errorStatus(err),
+      body: { error: safeHandlerMessage(err), ...stage },
     };
   }
 }
@@ -459,30 +483,8 @@ export function startHttpServer(
       if (steerMatch && req.method === "POST") {
         const payload = await readJsonObject(req, guard);
         if (!payload || guard.started) return;
-        if (typeof payload.prompt !== "string" && payload.prompt !== undefined) {
-          guard.json(400, { error: "prompt must be a string" });
-          return;
-        }
-        const prompt = typeof payload.prompt === "string" ? payload.prompt : "";
-        const existing = await engine.get(steerMatch[1]);
-        if (!existing) {
-          guard.json(404, { error: "not found" });
-          return;
-        }
-        if (TERMINAL_JOB_STAGES.has(existing.stage)) {
-          guard.json(409, { error: "job is terminal", stage: existing.stage });
-          return;
-        }
-        const job = await engine.steer(steerMatch[1], prompt);
-        if (!job) {
-          guard.json(404, { error: "not found" });
-          return;
-        }
-        guard.json(200, {
-          ok: true,
-          stage: job.stage,
-          steerQueueLength: job.steerQueue.length,
-        });
+        const reply = await handleSteerJobRequest(engine, steerMatch[1], payload);
+        guard.json(reply.status, reply.body);
         return;
       }
 

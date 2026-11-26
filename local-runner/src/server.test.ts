@@ -9,7 +9,12 @@ import path from "node:path";
 import type { RunnerConfig } from "./config.js";
 import { RunnerEngine } from "./engine.js";
 import { bindRunnerHttpServer } from "./http-bind.js";
-import { handleContinueJobRequest, handleStartJobRequest, startHttpServer } from "./server.js";
+import {
+  handleContinueJobRequest,
+  handleSteerJobRequest,
+  handleStartJobRequest,
+  startHttpServer,
+} from "./server.js";
 import { handleMcpJsonRpc, handleRunnerTool } from "./mcp-handlers.js";
 import { ValidationError } from "./settings-validation.js";
 import { BranchConflictError } from "./job-queue.js";
@@ -1005,9 +1010,19 @@ describe("continue job over HTTP and MCP", () => {
     const s = await startTestServer();
     try {
       await seedJob(s.dataDir, "job-1", "approved");
+      const capJob = await loadJob(s.dataDir, "job-1");
+      assert.ok(capJob);
+      capJob.reviewRound = 3;
+      capJob.maxRounds = 3;
+      await saveJob(s.dataDir, capJob);
       const badCases: Array<{ payload: Record<string, unknown>; message: string }> = [
-        { payload: { extraRounds: 0 }, message: "extraRounds must be between 1 and 10" },
-        { payload: { extraRounds: 11 }, message: "extraRounds must be between 1 and 10" },
+        {
+          payload: { extraRounds: 0 },
+          message:
+            "extraRounds 0 leaves maxRounds at 3, but reviewRound is already 3; pass extraRounds >= 1 to raise the cap",
+        },
+        { payload: { extraRounds: -1 }, message: "extraRounds must be between 0 and 10" },
+        { payload: { extraRounds: 11 }, message: "extraRounds must be between 0 and 10" },
         { payload: { extraRounds: 9 }, message: "maxRounds would exceed 10 (3 + 9)" },
       ];
       for (const { payload, message } of badCases) {
@@ -1039,7 +1054,35 @@ describe("continue job over HTTP and MCP", () => {
         extraRounds: 1,
       });
       assert.equal(mcp.result?.structuredContent.ok, true);
-      assert.equal((mcp.result?.structuredContent as { maxRounds: number }).maxRounds, 4);
+      const sc = mcp.result?.structuredContent as {
+        maxRounds: number;
+        priorMaxRounds: number;
+      };
+      assert.equal(sc.priorMaxRounds, 3);
+      assert.equal(sc.maxRounds, 4);
+    } finally {
+      await s.close();
+    }
+  });
+
+  it("retries a failed job with extraRounds 0 over HTTP and MCP without raising maxRounds", async () => {
+    const s = await startTestServer();
+    try {
+      await seedJob(s.dataDir, "job-http", "failed");
+      const http = await httpRequest(s.port, "POST", "/api/jobs/job-http/continue", {
+        token: TOKEN,
+        body: JSON.stringify({ extraRounds: 0 }),
+      });
+      assert.equal(http.status, 200);
+      const body = JSON.parse(http.body) as { priorMaxRounds: number; maxRounds: number };
+      assert.equal(body.priorMaxRounds, 3);
+      assert.equal(body.maxRounds, 3);
+
+      await seedJob(s.dataDir, "job-mcp", "failed");
+      const mcp = await mcpCall(s.port, "continue_job", { id: "job-mcp", extraRounds: 0 });
+      const sc = mcp.result?.structuredContent as { priorMaxRounds: number; maxRounds: number };
+      assert.equal(sc.priorMaxRounds, 3);
+      assert.equal(sc.maxRounds, 3);
     } finally {
       await s.close();
     }
@@ -1063,6 +1106,96 @@ describe("continue job over HTTP and MCP", () => {
     } as unknown as RunnerEngine;
     await handleContinueJobRequest(engine, "job-1", { prompt: "x" });
     assert.deepEqual(captured[0], { prompt: "x", id: "job-1" });
+  });
+});
+
+describe("steer job over HTTP and MCP (#270)", () => {
+  it("queues steer on a failed job for the next continue (HTTP and MCP)", async () => {
+    const s = await startTestServer();
+    try {
+      await seedJob(s.dataDir, "job-failed", "failed");
+      const http = await httpRequest(s.port, "POST", "/api/jobs/job-failed/steer", {
+        token: TOKEN,
+        body: JSON.stringify({ prompt: "resolve the merge first" }),
+      });
+      assert.equal(http.status, 200);
+      const body = JSON.parse(http.body) as {
+        ok: boolean;
+        stage: string;
+        steerQueueLength: number;
+      };
+      assert.equal(body.ok, true);
+      assert.equal(body.stage, "failed");
+      assert.equal(body.steerQueueLength, 1);
+      const stored = await loadJob(s.dataDir, "job-failed");
+      assert.deepEqual(stored?.steerQueue, ["resolve the merge first"]);
+
+      await seedJob(s.dataDir, "job-stuck", "stuck");
+      const mcp = await mcpCall(s.port, "steer_job", {
+        id: "job-stuck",
+        prompt: "focus on the tests",
+      });
+      assert.equal((mcp.result?.structuredContent as { stage: string }).stage, "stuck");
+      const mcpStored = await loadJob(s.dataDir, "job-stuck");
+      assert.deepEqual(mcpStored?.steerQueue, ["focus on the tests"]);
+    } finally {
+      await s.close();
+    }
+  });
+
+  it("rejects steer on approved, archived, and merged jobs with a continue_job hint", async () => {
+    const s = await startTestServer();
+    try {
+      await seedJob(s.dataDir, "job-ok", "approved");
+      const approved = await httpRequest(s.port, "POST", "/api/jobs/job-ok/steer", {
+        token: TOKEN,
+        body: JSON.stringify({ prompt: "more" }),
+      });
+      assert.equal(approved.status, 409);
+      const approvedBody = JSON.parse(approved.body) as { error: string; stage: string };
+      assert.equal(approvedBody.stage, "approved");
+      assert.match(approvedBody.error, /continue_job/);
+      assert.match(approvedBody.error, /prompt/);
+
+      const mcpApproved = await mcpCall(s.port, "steer_job", { id: "job-ok", prompt: "more" });
+      assert.match(mcpApproved.error?.message ?? "", /continue_job/);
+
+      await seedJob(s.dataDir, "job-merged", "failed");
+      const mergedJob = await loadJob(s.dataDir, "job-merged");
+      assert.ok(mergedJob);
+      mergedJob.ciStatus = {
+        status: "merged",
+        checkedAt: "2026-11-25T00:00:00.000Z",
+        source: "github",
+        mergedAt: "2026-11-25T00:00:00.000Z",
+      };
+      await saveJob(s.dataDir, mergedJob);
+      const merged = await httpRequest(s.port, "POST", "/api/jobs/job-merged/steer", {
+        token: TOKEN,
+        body: JSON.stringify({ prompt: "more" }),
+      });
+      assert.equal(merged.status, 409);
+      assert.match(JSON.parse(merged.body).error, /merged/);
+      assert.match(JSON.parse(merged.body).error, /continue_job/);
+
+      await seedJob(s.dataDir, "job-arch", "failed");
+      await httpRequest(s.port, "POST", "/api/jobs/job-arch/archive", { token: TOKEN });
+      const archived = await httpRequest(s.port, "POST", "/api/jobs/job-arch/steer", {
+        token: TOKEN,
+        body: JSON.stringify({ prompt: "more" }),
+      });
+      assert.equal(archived.status, 409);
+      assert.match(JSON.parse(archived.body).error, /archived/);
+    } finally {
+      await s.close();
+    }
+  });
+
+  it("handleSteerJobRequest rejects a non-string prompt", async () => {
+    const engine = { steer: async () => null } as unknown as RunnerEngine;
+    const reply = await handleSteerJobRequest(engine, "job-1", { prompt: 1 });
+    assert.equal(reply.status, 400);
+    assert.deepEqual(reply.body, { error: "prompt must be a string" });
   });
 });
 

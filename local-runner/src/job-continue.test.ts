@@ -7,6 +7,7 @@ import type { RunnerConfig } from "./config.js";
 import { CONTINUE_TERMINAL_STAGES, ContinueJobError, prepareJobContinue } from "./job-continue.js";
 import { loadJob, saveJob } from "./store.js";
 import type { JobRecord, JobStage } from "./types.js";
+import { ValidationError } from "./validation-error.js";
 import { jobLogFile } from "./paths.js";
 
 function cfg(dataDir: string): RunnerConfig {
@@ -101,6 +102,56 @@ describe("prepareJobContinue", () => {
       assert.equal(result.job.continueHistory?.[0].newMaxRounds, 4);
     });
   }
+
+  it("retries a failed post-PR job with extraRounds 0 without raising maxRounds", async () => {
+    const job = await seedTerminal(dataDir, "job-zero", "failed", {
+      reviewRound: 1,
+      maxRounds: 3,
+    });
+    const result = await prepareJobContinue(
+      cfg(dataDir),
+      { id: job.id, extraRounds: 0 },
+      { isRunning: () => false },
+    );
+    assert.equal(result.job.maxRounds, 3);
+    assert.equal(result.job.stage, "fixing");
+    assert.equal(result.job.continueHistory?.[0].extraRounds, 0);
+    assert.equal(result.job.continueHistory?.[0].priorMaxRounds, 3);
+    assert.equal(result.job.continueHistory?.[0].newMaxRounds, 3);
+  });
+
+  it("rejects extraRounds 0 when the post-PR job has no unused rounds", async () => {
+    const job = await seedTerminal(dataDir, "job-cap", "failed", {
+      reviewRound: 3,
+      maxRounds: 3,
+    });
+    await assert.rejects(
+      () =>
+        prepareJobContinue(
+          cfg(dataDir),
+          { id: job.id, extraRounds: 0 },
+          { isRunning: () => false },
+        ),
+      (err: unknown) => {
+        assert.ok(err instanceof ValidationError);
+        assert.match((err as Error).message, /reviewRound is already 3/);
+        return true;
+      },
+    );
+  });
+
+  it("defaults omitted extraRounds to 1 on a post-PR continue and records the cap change", async () => {
+    const job = await seedTerminal(dataDir, "job-default", "failed");
+    const result = await prepareJobContinue(
+      cfg(dataDir),
+      { id: job.id },
+      { isRunning: () => false },
+    );
+    assert.equal(result.job.maxRounds, 4);
+    assert.equal(result.job.continueHistory?.[0].extraRounds, 1);
+    assert.equal(result.job.continueHistory?.[0].priorMaxRounds, 3);
+    assert.equal(result.job.continueHistory?.[0].newMaxRounds, 4);
+  });
 
   it("resumes an interrupted pre-PR job at the build stage on its existing worktree", async () => {
     const job = await seedTerminal(dataDir, "job-int-nopr", "interrupted", {

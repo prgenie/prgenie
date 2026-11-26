@@ -3,6 +3,7 @@ import { CiWatcher, type CiTickStats, type CiWatcherDeps } from "./ci-watcher.js
 import { runJobLoop } from "./job-runner.js";
 import { enrichJobPublicView, watchdogCapApproaching, type JobPublicView } from "./job-api-view.js";
 import { JobControl } from "./job-control.js";
+import { assertSteerAllowed } from "./job-steer.js";
 import {
   archiveJob,
   clearFailedJobs,
@@ -496,16 +497,18 @@ export class RunnerEngine extends EventEmitter {
 
   async steer(jobId: string, prompt: string): Promise<JobRecord | null> {
     const trimmed = prompt.trim();
-    if (!trimmed) {
-      return loadJob(this.config.dataDir, jobId);
-    }
     const control = this.jobControls.get(jobId);
-    control?.pushSteer(trimmed);
     // Under the queue lock so a drain cannot dequeue between this load and save.
     return this.withQueueLock(async () => {
-      const job = await loadJob(this.config.dataDir, jobId);
+      const job =
+        (await loadJob(this.config.dataDir, jobId)) ??
+        (await loadArchivedJob(this.config.dataDir, jobId));
       if (!job) return null;
+      if (!trimmed) return job;
+      // Policy is shared with HTTP POST /api/jobs/:id/steer.
+      assertSteerAllowed(job);
       if (control) {
+        control.pushSteer(trimmed);
         JobControl.syncSteerQueueForPersist(job, control);
       } else {
         job.steerQueue.push(trimmed);
@@ -522,6 +525,7 @@ export class RunnerEngine extends EventEmitter {
     ok: true;
     id: string;
     stage: string;
+    priorMaxRounds: number;
     maxRounds: number;
     reviewRound: number;
     worktree: "reused" | "recreated" | "none";
@@ -546,10 +550,12 @@ export class RunnerEngine extends EventEmitter {
     if (this.watchCi && result.job.prUrl) {
       void this.ciWatcher.refreshJobById(result.job.id);
     }
+    const lastContinue = result.job.continueHistory?.at(-1);
     return {
       ok: true,
       id: result.job.id,
       stage: result.job.stage,
+      priorMaxRounds: lastContinue?.priorMaxRounds ?? result.job.maxRounds,
       maxRounds: result.job.maxRounds,
       reviewRound: result.job.reviewRound,
       worktree: result.worktree,
