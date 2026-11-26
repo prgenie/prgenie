@@ -41,6 +41,24 @@ Merge the default base branch into your branch (for example \`git merge origin/m
 
 Do not merge. Do not open a second PR. Do not force-push to main/master.`;
 
+/**
+ * Appended to the fix prompt when the runner's pre-fix merge of the base branch stopped on
+ * conflicts (#239). The merge is left in progress for the agent to finish.
+ */
+export function mergeConflictFixSection(base: string, files: string[], resumed = false): string {
+  const list = files.length
+    ? files.map((f) => `- ${f}`).join("\n")
+    : "- (no unmerged paths reported; the merge still needs to be committed)";
+  const how = resumed
+    ? `An unfinished merge of \`${base}\` was found in this worktree (MERGE_HEAD is set).`
+    : `The runner ran \`git merge ${base}\` and it stopped on conflicts. The merge is still in progress (MERGE_HEAD is set).`;
+  return `--- merge conflicts with ${base} ---
+${how} Conflicting files:
+${list}
+
+Resolve these merge conflicts first, by finishing this merge — do not rebase, do not run \`git merge --abort\`, and do not reset. Keep the intent of both sides; when they disagree, keep the base branch's behavior and re-apply this PR's change on top. Remove every conflict marker, \`git add\` the resolved files, and commit the merge (\`git commit --no-edit\`). Then address the review feedback and push. The runner checks that no conflict markers or MERGE_HEAD remain before it accepts the round.`;
+}
+
 export const DEFAULT_FIX_PROMPT = `${DEFAULT_FIX_PROMPT_BODY}
 
 ${CODE_PROVE_IT_WORKS_SECTION}`;

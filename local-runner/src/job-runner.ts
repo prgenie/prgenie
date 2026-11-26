@@ -17,6 +17,7 @@ import {
   DEFAULT_IMPLEMENT_PROMPT,
   DEFAULT_REVIEW_PROMPT,
   DRY_RUN_PLACEHOLDER_PROMPT,
+  mergeConflictFixSection,
 } from "./prompts.js";
 import {
   isDocsTemplateId,
@@ -39,7 +40,9 @@ import {
   branchHasNoCommitsBeyondBase,
   cloneRepo,
   ensureWorktree,
-  mergeOntoBase,
+  mergeOntoBaseOrConflict,
+  verifyMergeResolved,
+  type MergeOntoBaseResult,
 } from "./worktree.js";
 import { branchExistsOnOrigin, worktreePathExists } from "./worktree-cleanup.js";
 import { cursorWorktreeDir } from "./paths.js";
@@ -441,7 +444,8 @@ async function setStage(
   emit(cb, job, { type: "stage", stage, reviewRound: job.reviewRound });
 }
 
-async function runFixStage(
+/** Exported for tests; the job loop is the only production caller. */
+export async function runFixStage(
   runner: AgentRunner,
   config: RunnerConfig,
   job: JobRecord,
@@ -454,8 +458,19 @@ async function runFixStage(
   callbacks?: JobCallbacks,
 ): Promise<boolean> {
   await setStage(config, job, "fixing", control, callbacks);
+  let mergeConflict: Extract<MergeOntoBaseResult, { status: "conflict" }> | null = null;
   if (!job.dryRun) {
-    await mergeOntoBase(wt, baseSettings);
+    // On conflicts the merge stays in progress and goes to the fix agent instead of failing (#239).
+    const merged = await mergeOntoBaseOrConflict(wt, baseSettings);
+    if (merged.status === "conflict") {
+      mergeConflict = merged;
+      const files = merged.files.length ? merged.files.join(", ") : "(none unmerged)";
+      await runnerLog(
+        callbacks,
+        job,
+        `[runner] ${merged.resumed ? "Unfinished merge" : `git merge ${merged.base}`} has conflicts in ${files}; handing them to the fix agent.`,
+      );
+    }
   }
   const fixDefault = isDocsJob(job) ? resolveDocsFixPrompt() : DEFAULT_FIX_PROMPT;
   const fixPrompt = await readPromptFile(
@@ -468,9 +483,12 @@ async function runFixStage(
   );
   const fixSteer = control.drainSteer();
   const prLabel = job.dryRun ? "(dry run — simulated PR)" : String(job.prUrl);
+  const conflictSection = mergeConflict
+    ? `\n\n${mergeConflictFixSection(mergeConflict.base, mergeConflict.files, mergeConflict.resumed)}`
+    : "";
   const fixFull = fixSteer
-    ? `${fixPrompt}\n\nPR: ${prLabel}\n\n--- steer ---\n${fixSteer}`
-    : `${fixPrompt}\n\nPR: ${prLabel}`;
+    ? `${fixPrompt}\n\nPR: ${prLabel}${conflictSection}\n\n--- steer ---\n${fixSteer}`
+    : `${fixPrompt}\n\nPR: ${prLabel}${conflictSection}`;
 
   const fixRun = await runAgentStage(
     runner,
@@ -513,6 +531,17 @@ async function runFixStage(
       await setStage(config, job, "failed", control, callbacks);
     }
     return false;
+  }
+  if (mergeConflict) {
+    const check = await verifyMergeResolved(wt, mergeConflict.files);
+    if (!check.ok) {
+      const files = (check.files.length ? check.files : mergeConflict.files).join(", ");
+      job.error = `Merge of ${mergeConflict.base} was not resolved by the fix agent: ${check.reason}${files ? ` (${files})` : ""}. Resolve the conflicts in ${wt} by merging (not rebasing), commit the merge, push the branch, then continue_job.`;
+      await runnerLog(callbacks, job, `[runner] ${job.error}`);
+      await setStage(config, job, "failed", control, callbacks);
+      await notify(config, job, `Job failed: ${job.input.branch}`, callbacks?.fetchImpl, "failed");
+      return false;
+    }
   }
   if (
     !(await acceptProveEvidenceOrFail(
@@ -1164,6 +1193,8 @@ export async function runJobLoop(
     }
   } catch (err) {
     job.error = setJobError(job.error, err instanceof Error ? err.message : String(err));
+    // Keep the reason in the job log too: continue_job clears job.error (#239).
+    await runnerLog(callbacks, job, `[runner] job failed: ${job.error}`).catch(() => undefined);
     await setStage(config, job, "failed", control, callbacks);
     await notify(config, job, `Job failed: ${job.input.branch}`, callbacks?.fetchImpl, "failed");
   } finally {

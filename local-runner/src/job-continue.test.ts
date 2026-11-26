@@ -388,3 +388,62 @@ describe("prepareJobContinue", () => {
     assert.equal(loaded?.stageModels?.fix, "composer-2.5");
   });
 });
+
+describe("prepareJobContinue with an unfinished git operation (#239)", () => {
+  let dataDir = "";
+
+  beforeEach(async () => {
+    dataDir = await mkdtemp(path.join(os.tmpdir(), "lr-continue-merge-"));
+  });
+
+  function fakeGit(pending: "MERGE_HEAD" | "REBASE_HEAD", calls: string[][]) {
+    return async (_cwd: string, args: string[]) => {
+      calls.push(args);
+      if (args[0] === "rev-parse" && args.includes(pending)) {
+        return { code: 0, stdout: "abc\n", stderr: "" };
+      }
+      if (args[0] === "rev-parse") return { code: 1, stdout: "", stderr: "" };
+      return { code: 0, stdout: "", stderr: "" };
+    };
+  }
+
+  it("keeps an unfinished merge for the fix agent instead of aborting it (no retry loop)", async () => {
+    const job = await seedTerminal(dataDir, "job-merge", "failed", {
+      dryRun: false,
+      error: "git merge origin/main failed:",
+    });
+    const calls: string[][] = [];
+    const result = await prepareJobContinue(
+      cfg(dataDir),
+      { id: job.id },
+      {
+        isRunning: () => false,
+        ensureWorktree: async () => ({ path: job.worktreePath!, reused: true }),
+        gitImpl: fakeGit("MERGE_HEAD", calls),
+      },
+    );
+    assert.equal(result.job.stage, "fixing");
+    assert.ok(
+      !calls.some((a) => a[0] === "merge" && a[1] === "--abort"),
+      "must not abort the merge",
+    );
+    assert.ok(result.job.steerQueue.some((s) => /unfinished git merge/.test(s)));
+    assert.ok(!result.job.steerQueue.some((s) => /Aborted unfinished/.test(s)));
+  });
+
+  it("still aborts an unfinished rebase before continuing", async () => {
+    const job = await seedTerminal(dataDir, "job-rebase", "failed", { dryRun: false });
+    const calls: string[][] = [];
+    const result = await prepareJobContinue(
+      cfg(dataDir),
+      { id: job.id },
+      {
+        isRunning: () => false,
+        ensureWorktree: async () => ({ path: job.worktreePath!, reused: true }),
+        gitImpl: fakeGit("REBASE_HEAD", calls),
+      },
+    );
+    assert.ok(calls.some((a) => a[0] === "rebase" && a[1] === "--abort"));
+    assert.ok(result.job.steerQueue.some((s) => /Aborted unfinished git rebase/.test(s)));
+  });
+});

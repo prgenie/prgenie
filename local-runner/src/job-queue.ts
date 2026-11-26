@@ -81,6 +81,49 @@ export function decideJobStart(
   };
 }
 
+/**
+ * Terminal stages where a job still owns its branch's work in progress. `approved` is left out so
+ * a deliberate follow-up after an approved job keeps working (#219 releases its clean worktree).
+ */
+const RESUMABLE_TERMINAL_STAGES = new Set([
+  "failed",
+  "stuck",
+  "stopped",
+  "changes_remaining",
+  "interrupted",
+]);
+
+function hasOpenPr(j: JobRecord): boolean {
+  if (!j.prUrl?.trim()) return false;
+  const ci = j.ciStatus;
+  return !ci?.mergedAt && ci?.status !== "merged" && ci?.status !== "closed";
+}
+
+/**
+ * Unarchived, non-dry-run terminal jobs on the same repo+branch that should be continued rather
+ * than forked into a second job (#269): they still have an open PR or a job worktree on disk.
+ */
+export function terminalJobsOwningBranch(
+  jobs: JobRecord[],
+  branch: string,
+  repoSlug: string,
+  hasWorktree: (j: JobRecord) => boolean,
+): JobRecord[] {
+  return jobs.filter(
+    (j) =>
+      !j.archivedAt &&
+      !j.dryRun &&
+      RESUMABLE_TERMINAL_STAGES.has(j.stage) &&
+      sameBranch(j, branch, repoSlug) &&
+      (hasOpenPr(j) || hasWorktree(j)),
+  );
+}
+
+export function formatTerminalBranchOwnerError(owner: JobRecord, branch: string): string {
+  const pr = owner.prUrl?.trim() ? `, PR ${owner.prUrl.trim()}` : "";
+  return `job ${owner.id} (stage ${owner.stage}${pr}) already owns branch ${branch}. Use continue_job on ${owner.id} to resume it, or archive it before starting a new job on this branch.`;
+}
+
 export async function listJobsForQueue(dataDir: string): Promise<JobRecord[]> {
   return listJobs(dataDir);
 }

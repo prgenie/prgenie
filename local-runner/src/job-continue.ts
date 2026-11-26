@@ -207,7 +207,13 @@ export async function prepareJobContinue(
     worktree = wt.reused ? "reused" : "recreated";
     const gitImpl = deps.gitImpl ?? defaultGit;
     const pending = await detectGitOperationInProgress(wt.path, gitImpl);
-    if (pending) {
+    if (pending === "merge" && !resumeBuild && !resumePostBuildPr) {
+      // Keep an unfinished base merge: the fix stage hands its conflicts to the agent instead of
+      // redoing the same merge and failing again (#239). Aborting here caused a retry loop.
+      job.steerQueue.push(
+        "[runner] Found an unfinished git merge in the worktree; the fix agent will resolve its conflicts and commit the merge.",
+      );
+    } else if (pending) {
       const aborted = await abortGitOperationInProgress(wt.path, pending, gitImpl);
       if (!aborted.ok) {
         throw new ContinueJobError(
