@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.10 — 2026-11-26
+
+- Extension and site: new lamp logo for the header, favicons, Open Graph image, and Cursor extension icon (#268).
+- Plugin: displayName is "PR Genie" for the directory listing (#266); logo assets added for that listing (#267).
+- Runner: base-merge conflicts in the fix stage go to the fix agent with conflicting files and git output in the error; continue keeps an unfinished merge instead of aborting it; starting a second job on a branch the runner already owns is refused (#271, #239, #269).
+- Runner: `continue_job` accepts `extraRounds: 0` so a continue does not add a review round (still 400 at the cap); HTTP and MCP steer share one policy and can queue steer on failed, stuck, interrupted, stopped, and changes_remaining jobs (#272, #270).
+
 ## 0.1.9 — 2026-11-22
 
 - Runner: optional **arena** implement fans out N parallel build candidates, synthesizes one branch with an internal rubric and graft step, verifies `PROVE: EVIDENCE`, and cleans up loser worktrees; off by default (#250).

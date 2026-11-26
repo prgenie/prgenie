@@ -1,6 +1,6 @@
 {
   "name": "prgenie",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "PR Genie local runner — MCP stdio job loop (implement → PR → review → fix)",
   "license": "MIT",
   "repository": {
